@@ -24,4 +24,4 @@ One entry per task. The agent fills in everything except `Human review:`, which 
 - ESLint 10 and TypeScript 7 broke peer ranges → pinned 9.x / 6.0.x.
 - Checked, rather than assumed, that `process.loadEnvFile` does not override shell variables before documenting the prod seed command.
 
-**Human review:**
+**Human review:ตรวจแผนก่อนให้ลงมือ, ตอบ 6 คำถาม (เลือก pg แทน Neon HTTP driver เพราะต้องใช้ transaction), ทดสอบ login และ responsive เองทั้งในเครื่องและบน production, deploy เอง**
