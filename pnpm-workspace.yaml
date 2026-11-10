@@ -1,0 +1,6 @@
+allowBuilds:
+  esbuild: true
+# pnpm settings for this single-package repo.
+# Supply-chain guard: never resolve a version published less than 7 days ago.
+minimumReleaseAge: 10080
+saveExact: true
