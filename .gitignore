@@ -1,0 +1,17 @@
+# dependencies
+node_modules/
+
+# env (never commit secrets)
+.env*
+!.env.example
+
+# build
+.next/
+out/
+dist/
+coverage/
+
+# misc
+.DS_Store
+*.log
+.vercel
