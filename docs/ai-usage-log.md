@@ -57,3 +57,12 @@ One entry per task. The agent fills in everything except `Human review:`, which 
 - Verified: the key is read only in the route handler (`process.env.LEAD_INTAKE_API_KEY`). `/contact-us` submits via a server action that calls `createWebsiteLead` directly and never uses the key. No code change needed there.
 
 **Human review:**
+- ให้ reviewer agent อีกตัวตรวจ diff ของ Phase 2 รอบแรกได้ผล FAIL (ปัญหาที่ต้องแก้ 2 ข้อ, ข้อเล็ก 5 ข้อ) 
+แก้แล้วตรวจซ้ำรอบที่สองผ่าน:
+  - error log บันทึกแค่ชื่อ error และรหัส pg ไม่บันทึกข้อความ error เพราะอาจมีข้อมูลลูกค้าติดอยู่
+  - กรณี foreign key ไม่ถูกต้อง ตอบกลับเป็น 400 แทน 500
+  - ฟอร์มเว็บไซต์ที่ถูกส่งพร้อมกันหลายครั้งไม่สร้าง lead ซ้ำ
+  - contact ที่ถูกลบข้อมูลแล้ว แก้ไขไม่ได้
+  - endpoint สาธารณะตรวจ rate limit ก่อนตรวจ API key
+- การแก้ไขสำคัญหลังคนตรวจ: Vercel ไม่ยอมเก็บ PUBLIC_LEAD_API_KEY เป็น Secret เพราะชื่อขึ้นต้นด้วย PUBLIC_ ซึ่งหมายถึงค่าที่ส่งไปฝั่งเบราว์เซอร์ได้ จึงเปลี่ยนชื่อเป็น LEAD_INTAKE_API_KEY และให้ agent ยืนยันว่า key ถูกอ่านเฉพาะฝั่ง server ไม่ถูกส่งจากเบราว์เซอร์
+- ทดสอบเองทั้งในเครื่องและบน production: ค้นชื่อภาษาไทย, กรองตาม stage, เปลี่ยน stage แล้วเกิด activity, timeline ในหน้า lead detail, เพิ่ม note, สร้าง/แก้ไข company และ contact, ส่งฟอร์ม /contact-us แล้วได้ lead ที่ source = website, และหน้าจอบนมือถือ
