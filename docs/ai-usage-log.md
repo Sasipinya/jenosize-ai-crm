@@ -25,3 +25,35 @@ One entry per task. The agent fills in everything except `Human review:`, which 
 - Checked, rather than assumed, that `process.loadEnvFile` does not override shell variables before documenting the prod seed command.
 
 **Human review:ตรวจแผนก่อนให้ลงมือ, ตอบ 6 คำถาม (เลือก pg แทน Neon HTTP driver เพราะต้องใช้ transaction), ทดสอบ login และ responsive เองทั้งในเครื่องและบน production, deploy เอง**
+
+---
+
+## 2026-11-12 · Phase 2: CRM core
+
+**Task:** Services, Route Handlers, leads list/detail/new, companies and contacts pages, website intake + `/contact-us`, crm-flow test.
+
+**Prompt summary:** "go Phase 2" → plan.md day 2 + MASTER_PROMPT Phase 2 scope (R3–R8, R24a).
+
+**What the agent produced:**
+- Services in `src/server/services` (leads, contacts, companies, activities), `errors.ts`, `http.ts` (`withAuth`, standard error shape, requestId), in-memory `rate-limit.ts`.
+- 11 route handlers under `src/app/api` (Zod at the boundary; public intake uses API key + rate limit + honeypot).
+- Pages: leads list (filters, paging, inline stage select), lead detail (profile, edit, notes, timeline), new lead, companies and contacts (list, new, edit), `/contact-us`.
+- `tests/crm-flow.test.ts`: 13 tests (stage change + activity, lost needs reason, terminal stages, Thai search, LIKE escaping, website intake, honeypot, rate limit).
+- ADR 007. `LEAD_INTAKE_API_KEY` added to `.env.example`.
+
+**Agent self-corrections worth reviewing:**
+- First batch of route files was lost to a shell heredoc parse error; noticed nothing was written and recreated them.
+- Stage select first imported `LEAD_STAGES` from the schema, pulling drizzle into the client bundle; replaced with a local list that `satisfies` the schema type.
+- Removed an unused `recentCompanies` helper and a leftover `void z` line.
+
+**Human review:**
+
+## 2026-11-12 — Rename PUBLIC_LEAD_API_KEY to LEAD_INTAKE_API_KEY
+
+**Prompt summary:** Rename the env var everywhere (Vercel rejects the PUBLIC_ prefix as a Secret); confirm the key is only read server-side and `/contact-us` never sends it from the browser.
+
+**Produced:**
+- Renamed in `.env.example`, `src/app/api/public/leads/route.ts` and this log. No test or ADR referenced the old name.
+- Verified: the key is read only in the route handler (`process.env.LEAD_INTAKE_API_KEY`). `/contact-us` submits via a server action that calls `createWebsiteLead` directly and never uses the key. No code change needed there.
+
+**Human review:**
