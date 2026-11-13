@@ -1,5 +1,5 @@
 // AI suggestion service: pending-only output, per-lead cache, fallback, and the decide-once guard.
-import { and, count, eq } from "drizzle-orm";
+import { and, count, eq, ne } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createMockAdapter } from "@/server/services/ai-adapters";
 import { aiSuggestions, activities, appSettings, contacts, leads, users } from "@/server/db/schema";
@@ -91,6 +91,30 @@ describe("suggestForLead", () => {
     await setFlag(false);
     expect(suggestion.source).toBe("fallback");
     expect(adapter.calls).toHaveLength(0);
+  });
+
+  it("uses the lead OWNER's polite particle, not the person who clicked; a lead with no owner falls back to the person who clicked", async () => {
+    const [clicker] = await t.db.select({ p: users.politeParticle }).from(users).where(eq(users.id, actor.id));
+    const [owner] = await t.db.select().from(users).where(ne(users.id, actor.id)).limit(1);
+    const ownerOriginal = owner!.politeParticle;
+    await t.db.update(users).set({ politeParticle: "ค่ะ" }).where(eq(users.id, owner!.id));
+    await t.db.update(users).set({ politeParticle: "ครับ" }).where(eq(users.id, actor.id));
+    try {
+      const owned = await createLead(t.db, actor, { title: "Owned", contactId, companyId: null, ownerId: owner!.id, valueThb: 0 });
+      const a1 = createMockAdapter();
+      await suggestForLead(t.db, actor, owned.id, { adapter: a1 });
+      expect(a1.calls[0]!.context.politeParticle).toBe("ค่ะ");
+      expect(a1.calls[0]!.user).toContain("salesperson_polite_particle: ค่ะ");
+
+      const unowned = await newLead("No owner");
+      await t.db.update(leads).set({ ownerId: null }).where(eq(leads.id, unowned.id));
+      const a2 = createMockAdapter();
+      await suggestForLead(t.db, actor, unowned.id, { adapter: a2 });
+      expect(a2.calls[0]!.context.politeParticle).toBe("ครับ");
+    } finally {
+      await t.db.update(users).set({ politeParticle: ownerOriginal }).where(eq(users.id, owner!.id));
+      await t.db.update(users).set({ politeParticle: clicker!.p }).where(eq(users.id, actor.id));
+    }
   });
 
   it("ignores a dismissed suggestion in the cache: Refresh after a Dismiss generates a new one", async () => {

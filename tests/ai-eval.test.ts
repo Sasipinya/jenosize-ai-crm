@@ -12,8 +12,8 @@ describe("eval cases on the mock adapter", () => {
     const results = await runEvalCases(createMockAdapter());
     const failed = results.filter((r) => r.status === "fail");
     expect(failed.map((r) => `#${r.id}: ${r.failures.join("; ")}`)).toEqual([]);
-    // 12 cases: 11 run (case 10 is covered by ai-suggestions.test.ts and skipped here). Cases 11 and 12 must not silently drop out.
-    expect(results.filter((r) => r.status === "pass").map((r) => r.id)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12]);
+    // 13 cases: 12 run (case 10 is covered by ai-suggestions.test.ts and skipped here). Cases 11-13 must not silently drop out.
+    expect(results.filter((r) => r.status === "pass").map((r) => r.id)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13]);
     expect(results.find((r) => r.id === 10)?.status).toBe("skipped");
   });
 });

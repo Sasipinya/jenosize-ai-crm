@@ -99,3 +99,20 @@ One entry per task. The agent fills in everything except `Human review:`, which 
 - ขอให้กันการกด Accept ซ้ำ/พร้อมกันด้วยเงื่อนไข status = 'pending' พร้อมเทสต์ concurrent
 - agent แจ้งว่า .env.example มี LEAD_INTAKE_API_KEY จริงที่ commit ไปแล้ว → rotate key ทันที (.env.local + Vercel) และให้เพิ่ม pnpm check:env ใน lint กันเกิดซ้ำ
 - ตั้ง spending limit ใน Anthropic Console ($10/เดือน, ปิด auto-reload) และเลือก claude-haiku-5-5 เพื่อคุมค่าใช้จ่าย
+- รีวิว staged diff ก่อน commit เน้นไฟล์ที่แก้ผ่านสคริปต์
+
+## 2026-11-14 — Phase 3 follow-up: polite particle owned by the lead owner, normalised in code
+
+**Prompt summary:** Production with the real model produced a draft that mixed particles ("สวัสดีครับ … ค่ะ … ได้ไหมคะ"): the customer wrote ครับ and the model copied it. Decide whose particle is used (the lead owner's), enforce it in the guardrails (no prompt change), add eval case 13. Then four review rounds on the masking of names; time-boxed by the owner.
+
+**Produced:**
+- `skills/crm-copilot/particles.ts` (`normalizeParticles`): owner ค่ะ → ครับ becomes ค่ะ, question endings become คะ; owner ครับ → ค่ะ/ค๊ะ/คะ become ครับ; คะแนน, คะเน, คะน้า, คะนึง etc. untouched; contact and company names masked while rewriting (single private-use characters, restored in reverse, private-use characters stripped from drafts).
+- `ai-suggestions.ts` now takes the particle from the lead owner (fallback: the person who clicked); `ai-generate.ts` applies the rewrite and returns `particleNormalised`; eval report marks it and keeps the model's original draft; mock mode `mixed_particles`; eval case 13; `tests/ai-particles.test.ts`, owner-vs-clicker test in `ai-suggestions.test.ts`.
+- SKILL.md: owner's particle rule, guardrail text, case 13 row and known limitations (word-list heuristic, gendered pronouns, nickname vs คะแนน collision, stored names only, private-use stripping flag).
+
+**Agent self-corrections worth reviewing:**
+- The first version rewrote real customer names that contain คะ (คะนึงนิจ → ครับนึงนิจ), found by the reviewer; fixed by masking names.
+- My first "lossless masking" test passed on the old buggy masks (reviewer caught it). Rewritten with 11+ names and proven to fail on the old masks before restoring the fix.
+- I had said earlier that code used the lead owner's particle: it actually used the person who clicked; fixed.
+
+**Human review:**

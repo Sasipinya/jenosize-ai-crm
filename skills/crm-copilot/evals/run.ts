@@ -51,6 +51,8 @@ export type CaseResult = {
   /** What the model answered before the code guardrails. Differs from `output` when the guardrail replaced the draft. */
   rawOutput: SuggestionOutput | null;
   draftReplaced: boolean;
+  /** The guardrail rewrote the polite particle in the model's draft. */
+  particleNormalised: boolean;
   usage: Usage;
   estimatedCostUsd: number | null;
   note?: string;
@@ -123,7 +125,7 @@ export async function runEvalCases(adapter: LlmAdapter | null, opts: { timeoutMs
   const results: CaseResult[] = [];
   for (const c of [...(cases as EvalCase[])].sort((a, b) => a.id - b.id)) {
     if (opts.only && !opts.only.includes(c.id)) continue;
-    const base = { id: c.id, title: c.title, manual: c.manual, usage: ZERO_USAGE, estimatedCostUsd: 0 as number | null, source: null, output: null as SuggestionOutput | null, rawOutput: null as SuggestionOutput | null, draftReplaced: false };
+    const base = { id: c.id, title: c.title, manual: c.manual, usage: ZERO_USAGE, estimatedCostUsd: 0 as number | null, source: null, output: null as SuggestionOutput | null, rawOutput: null as SuggestionOutput | null, draftReplaced: false, particleNormalised: false };
     if (c.kind === "service" || !c.input) {
       results.push({ ...base, status: "skipped", failures: [], note: `covered by ${c.coveredBy}` });
       continue;
@@ -149,7 +151,7 @@ export async function runEvalCases(adapter: LlmAdapter | null, opts: { timeoutMs
       const f = evaluate(check, res.output, res.source, prompt);
       if (f) failures.push(f);
     }
-    results.push({ ...base, status: failures.length ? "fail" : "pass", failures, source: res.source, output: res.output, rawOutput: res.rawOutput, draftReplaced: res.draftReplaced, usage: res.usage, estimatedCostUsd: res.estimatedCostUsd });
+    results.push({ ...base, status: failures.length ? "fail" : "pass", failures, source: res.source, output: res.output, rawOutput: res.rawOutput, draftReplaced: res.draftReplaced, particleNormalised: res.particleNormalised, usage: res.usage, estimatedCostUsd: res.estimatedCostUsd });
   }
   return results;
 }

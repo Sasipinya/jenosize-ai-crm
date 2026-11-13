@@ -2,6 +2,7 @@
 // Any failure ends in the rule-based fallback, so the caller always gets a schema-valid result.
 import { neutralReply, ruleBasedSuggestion } from "../../../skills/crm-copilot/fallback";
 import { unsupportedOffer } from "../../../skills/crm-copilot/guardrails";
+import { normalizeParticles } from "../../../skills/crm-copilot/particles";
 import { buildUserPrompt, PROMPT_VERSION, SYSTEM_PROMPT } from "../../../skills/crm-copilot/prompt";
 import { suggestionOutputSchema, type AiContext, type SuggestionOutput } from "../../../skills/crm-copilot/schema";
 import { AdapterError, estimateCostUsd, ZERO_USAGE, type LlmAdapter, type Usage } from "./ai-adapters";
@@ -24,6 +25,8 @@ export type GenerateResult = {
   failure?: FailureReason;
   /** The model's draft broke a guardrail and was replaced by a neutral reply. */
   draftReplaced: boolean;
+  /** The draft used the other polite particle (e.g. the customer's ครับ) and was rewritten to the owner's. */
+  particleNormalised: boolean;
   /** The model's parsed answer BEFORE guardrails (null for the rule-based fallback). For the eval report; never stored in the DB. */
   rawOutput: SuggestionOutput | null;
 };
@@ -36,9 +39,11 @@ const withReason = (reasons: string[], reason: string) => (reasons.length >= 5 ?
  * 1. won/lost leads get no draft and "wait" unless the customer wrote last;
  * 2. a draft that mentions a discount, promotion or percentage, or states a price that is not the lead
  *    value or a figure in our outbound messages, is replaced by a neutral reply and a reason is added
- *    (see skills/crm-copilot/guardrails.ts).
+ *    (see skills/crm-copilot/guardrails.ts);
+ * 3. the draft speaks with the lead owner's polite particle only: the other one is rewritten
+ *    (see skills/crm-copilot/particles.ts).
  */
-export function applyGuardrails(out: SuggestionOutput, ctx: AiContext): { output: SuggestionOutput; draftReplaced: boolean } {
+export function applyGuardrails(out: SuggestionOutput, ctx: AiContext): { output: SuggestionOutput; draftReplaced: boolean; particleNormalised: boolean } {
   let result = out;
   const terminal = ctx.lead.stage === "won" || ctx.lead.stage === "lost";
   if (terminal && !ctx.lead.newestEventIsInbound) {
@@ -61,7 +66,15 @@ export function applyGuardrails(out: SuggestionOutput, ctx: AiContext): { output
       };
     }
   }
-  return { output: result, draftReplaced };
+  let particleNormalised = false;
+  if (result.draftReply !== null) {
+    const fixed = normalizeParticles(result.draftReply, ctx.politeParticle, [ctx.contact.fullName, ctx.company?.name]);
+    if (fixed !== result.draftReply) {
+      particleNormalised = true;
+      result = { ...result, draftReply: fixed };
+    }
+  }
+  return { output: result, draftReplaced, particleNormalised };
 }
 
 export const enforceGuardrails = (out: SuggestionOutput, ctx: AiContext): SuggestionOutput => applyGuardrails(out, ctx).output;

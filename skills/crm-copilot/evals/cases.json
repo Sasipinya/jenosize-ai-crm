@@ -186,6 +186,23 @@
     ]
   },
   {
+    "id": 13,
+    "title": "The customer writes ครับ, the salesperson particle is ค่ะ: the draft never contains ครับ",
+    "manual": false,
+    "input": {
+      "lead": { "title": "LINE enquiry", "stage": "qualified", "source": "line", "valueThb": 0, "daysInStage": 2 },
+      "contact": { "fullName": "คุณสมชาย" },
+      "company": null,
+      "politeParticle": "ค่ะ",
+      "events": [{ "daysAgo": 0, "kind": "in", "text": "สวัสดีครับ สนใจแพ็กเกจรายปีครับ ราคาเท่าไหร่ครับ ขอรายละเอียดหน่อยครับ" }]
+    },
+    "checks": [
+      { "type": "draftNotNull" },
+      { "type": "draftMatch", "pattern": "ค่ะ|คะ(?!แนน)" },
+      { "type": "draftNotMatch", "pattern": "ครับ" }
+    ]
+  },
+  {
     "id": 10,
     "title": "Same lead, no new activity: second call is served from cache",
     "manual": false,

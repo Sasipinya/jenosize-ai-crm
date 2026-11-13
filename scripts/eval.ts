@@ -34,6 +34,7 @@ for (const r of results) {
   const tag = r.status === "pass" ? "PASS" : r.status === "fail" ? "FAIL" : "SKIP";
   console.log(`${tag}  #${r.id} ${r.title}${r.failures.length ? `\n      ${r.failures.join("\n      ")}` : ""}${r.note ? ` (${r.note})` : ""}`);
   if (r.draftReplaced) console.log("      guardrail replaced the model's draft (see the report for the original)");
+  else if (r.particleNormalised) console.log("      guardrail rewrote the polite particle (see the report for the original)");
   if (r.status === "fail" && r.output) console.log(`      output: ${JSON.stringify(r.output)}`); // synthetic eval data, safe to print
 }
 const failed = results.filter((r) => r.status === "fail").length;
@@ -63,7 +64,7 @@ function writeReport(rows: CaseResult[]) {
     "| # | Case | Auto result | Source | Input tok | Output tok | Cache read tok | Cache write tok | Est. cost | Manual score |",
     "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ...rows.map((r) => {
-      const replaced = r.draftReplaced ? " (guardrail replaced the model's draft)" : "";
+      const replaced = r.draftReplaced ? " (guardrail replaced the model's draft)" : r.particleNormalised ? " (guardrail rewrote the polite particle)" : "";
       const auto = r.status === "pass" ? `PASS${replaced}` : r.status === "fail" ? `FAIL${replaced}: ${r.failures.join("; ").replaceAll("|", "/")}` : `SKIP (${r.note})`;
       return `| ${r.id} | ${r.title} | ${auto} | ${r.source ?? "-"} | ${r.usage.inputTokens} | ${r.usage.outputTokens} | ${r.usage.cacheReadTokens} | ${r.usage.cacheWriteTokens} | ${fmtCost(r.estimatedCostUsd)} | ${r.manual ? "" : "n/a"} |`;
     }),
@@ -75,8 +76,8 @@ function writeReport(rows: CaseResult[]) {
       .flatMap((r) => [
         `**#${r.id} ${r.title}** — ${r.status.toUpperCase()}${r.failures.length ? `: ${r.failures.join("; ").replaceAll("`", "'")}` : ""}`,
         "",
-        ...(r.draftReplaced && r.rawOutput
-          ? ["Model output BEFORE the guardrail (its draft was replaced):", "", ...fenced(r.rawOutput), "Final output (after guardrails):", ""]
+        ...((r.draftReplaced || r.particleNormalised) && r.rawOutput
+          ? [`Model output BEFORE the guardrail (its draft was ${r.draftReplaced ? "replaced" : "rewritten"}):`, "", ...fenced(r.rawOutput), "Final output (after guardrails):", ""]
           : ["Final output (the guardrails changed nothing):", ""]),
         ...fenced(r.output),
       ]),

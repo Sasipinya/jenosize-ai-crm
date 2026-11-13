@@ -45,6 +45,15 @@ async function fewShotEnabled(db: Db): Promise<boolean> {
   return row?.value !== false;
 }
 
+/** Polite particle of `userId`; if that user no longer exists, of the actor. */
+async function particleFor(db: Db, userId: string, actorId: string): Promise<"ครับ" | "ค่ะ"> {
+  for (const id of userId === actorId ? [actorId] : [userId, actorId]) {
+    const [row] = await db.select({ politeParticle: users.politeParticle }).from(users).where(eq(users.id, id)).limit(1);
+    if (row) return row.politeParticle;
+  }
+  throw new AppError("UNAUTHORIZED", "User not found");
+}
+
 /** The actor's 3 most recent accepted/edited replies. Dismissed suggestions are never used. */
 async function approvedReplies(db: Db, actorId: string): Promise<string[]> {
   const rows = await db
@@ -82,15 +91,16 @@ export async function suggestForLead(
     return { suggestion: latest, cached: true };
   }
 
-  const [user] = await db.select({ politeParticle: users.politeParticle }).from(users).where(eq(users.id, actor.id)).limit(1);
-  if (!user) throw new AppError("UNAUTHORIZED", "User not found");
+  // The reply speaks for the lead OWNER, so the owner's polite particle is used (not the person who clicked).
+  // A lead with no owner falls back to the person who clicked.
+  const politeParticle = await particleFor(db, detail.lead.ownerId ?? actor.id, actor.id);
 
   const ctx = buildContext({
     lead: detail.lead,
     contact: { fullName: detail.contact.fullName },
     company: detail.company ? { name: detail.company.name, industry: detail.company.industry } : null,
     timeline: detail.timeline,
-    politeParticle: user.politeParticle,
+    politeParticle,
     fewShot: (await fewShotEnabled(db)) ? await approvedReplies(db, actor.id) : [],
     now: deps.now,
   });
@@ -121,6 +131,7 @@ export async function suggestForLead(
     source: result.source,
     failure: result.failure,
     draftReplaced: result.draftReplaced,
+    particleNormalised: result.particleNormalised,
     attempts: result.attempts,
     inputTokens: result.usage.inputTokens,
     outputTokens: result.usage.outputTokens,

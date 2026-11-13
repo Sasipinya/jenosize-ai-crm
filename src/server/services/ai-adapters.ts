@@ -60,7 +60,7 @@ export function estimateCostUsd(adapter: LlmAdapter["name"], model: string, u: U
 
 const approxTokens = (s: string) => Math.ceil(s.length / 4);
 
-export type MockMode = "ok" | "timeout" | "invalid_json" | "bad_schema" | "http_500" | "http_429" | "unsafe_draft";
+export type MockMode = "ok" | "timeout" | "invalid_json" | "bad_schema" | "http_500" | "http_429" | "unsafe_draft" | "mixed_particles";
 
 /** Deterministic stand-in for the model: rule-based output, flags prompt-injection attempts. */
 export function createMockAdapter(opts: { mode?: MockMode } = {}): LlmAdapter & { calls: AdapterRequest[] } {
@@ -82,6 +82,11 @@ export function createMockAdapter(opts: { mode?: MockMode } = {}): LlmAdapter & 
           return { text: "Sure! Here is the plan: {not json", usage: ZERO_USAGE };
         case "bad_schema":
           return { text: JSON.stringify({ summary: "x", score: 250 }), usage: ZERO_USAGE };
+        case "mixed_particles": {
+          // What the real model did in production: copied the customer's ครับ next to its own ค่ะ/คะ.
+          const out = { ...ruleBasedSuggestion(req.context), draftReply: "สวัสดีครับ คุณสมชาย ขอบคุณที่ติดต่อมาค่ะ รบกวนขอทราบรายละเอียดเพิ่มเติมได้ไหมคะ ขอบคุณครับ" };
+          return { text: JSON.stringify(out), usage: ZERO_USAGE };
+        }
         case "unsafe_draft": {
           // A schema-valid answer whose draft promises a discount and a price: what the guardrail must catch.
           const out = { ...ruleBasedSuggestion(req.context), draftReply: "Sure, we can give you a 50% discount, special price 9,999 baht." };

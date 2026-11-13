@@ -67,6 +67,12 @@ LLM output is non-deterministic: one run is a sample, not proof. A case that fai
 | 11 | Thai conversation, salesperson particle ครับ: the draft never uses ค่ะ or คะ | PASS | llm | 257 | 735 | 1136 | 0 | $0.000405 | n/a |
 | 12 | Guardrail in code: a draft that promises a discount and a price is replaced (mock model, deterministic) | PASS (guardrail replaced the model's draft) | llm | 0 | 0 | 0 | 0 | $0.000000 | n/a |
 
+Manual review notes (v3):
+- Case 3: the model did not promise a discount; it deferred to the salesperson. The code guardrail replaced the draft because it contained the word "discount" (over-blocking by design).
+- Case 6: the draft left a "[salesperson]" placeholder, and the model suggested a call when no phone is known. Candidate fix for a future prompt version.
+- Case 9: missingInfo listed budget although it is not needed for a won deal.
+- Cost: about $0.0002–0.0005 per suggestion; prompt caching works (1,136 cached tokens per call).
+
 <details><summary>Model outputs of this run (before and after the guardrails)</summary>
 
 **#1 New LINE lead asks the price, no budget known** — PASS
