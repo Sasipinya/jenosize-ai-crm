@@ -66,3 +66,36 @@ One entry per task. The agent fills in everything except `Human review:`, which 
   - endpoint สาธารณะตรวจ rate limit ก่อนตรวจ API key
 - การแก้ไขสำคัญหลังคนตรวจ: Vercel ไม่ยอมเก็บ PUBLIC_LEAD_API_KEY เป็น Secret เพราะชื่อขึ้นต้นด้วย PUBLIC_ ซึ่งหมายถึงค่าที่ส่งไปฝั่งเบราว์เซอร์ได้ จึงเปลี่ยนชื่อเป็น LEAD_INTAKE_API_KEY และให้ agent ยืนยันว่า key ถูกอ่านเฉพาะฝั่ง server ไม่ถูกส่งจากเบราว์เซอร์
 - ทดสอบเองทั้งในเครื่องและบน production: ค้นชื่อภาษาไทย, กรองตาม stage, เปลี่ยน stage แล้วเกิด activity, timeline ในหน้า lead detail, เพิ่ม note, สร้าง/แก้ไข company และ contact, ส่งฟอร์ม /contact-us แล้วได้ lead ที่ source = website, และหน้าจอบนมือถือ
+
+## 2026-11-13 — Phase 3: write skills/crm-copilot/SKILL.md (no code yet)
+
+**Prompt summary:** Write SKILL.md first with all 7 sections and at least 5 eval cases, then stop for review. Anthropic Claude only; mock adapter for tests/CI; cost controls (max_tokens ~800, 20 events, prompt caching, per-lead cache, token/cost logging).
+
+**Produced:**
+- `skills/crm-copilot/SKILL.md` with Purpose, Inputs, Outputs, Allowed actions, Guardrails, Failure behavior, Evaluation cases (10).
+- No code written. Waiting for human review.
+
+**Human review:**
+
+## 2026-11-13 — Phase 3: crm-copilot code (adapters, fallback, decisions, panel, eval runner)
+
+**Prompt summary:** SKILL.md approved with notes. Build the AI skill: mock + Claude adapters, context builder with PII redaction (including few-shot), rule-based fallback, per-lead cache, Accept/Edit/Dismiss with reject-reason enum, decide-once guard, `pnpm eval` runner with `docs/eval-report.md` output, and a `.env.example` secret check. Replace the real-looking key in `.env.example` with a placeholder.
+
+**Produced:**
+- `skills/crm-copilot/{schema,prompt,fallback}.ts`, `evals/cases.json` (10 cases), `evals/run.ts`.
+- `src/server/services/ai-{context,adapters,generate,suggestions}.ts`, routes `/api/ai/suggest` and `/api/ai/suggestions/:id/decision`, `AiPanel` on the lead page.
+- Migration `drizzle/0003_*`: `reject_note` column, CHECK on `reject_reason` enum.
+- `scripts/eval.ts`, `scripts/check-env-example.ts` (wired into `pnpm lint`), tests for cache, fallback, few-shot, decide-once (double, concurrent, dismiss→accept), eval cases and the secret scanner.
+- Claude adapter uses `fetch` against the Messages API: no new dependency added (SDK needs your approval).
+
+**Agent self-corrections worth reviewing:**
+- First wrote Phase 3 file edits with python scripts; switched to the Edit tool when asked.
+- Seed already inserts `simulate_ai_down`; the test now upserts instead of inserting.
+
+**Human review:**
+- รีวิว SKILL.md ก่อนให้เขียนโค้ด ยืนยันว่า Dismiss ไม่ต้องเขียน activity เพราะมีบันทึกใน ai_suggestions อยู่แล้ว และขอให้เพิ่ม eval-report.md ที่มีช่องให้คนให้คะแนน
+- รีวิว prompt.ts แล้วพบว่า few-shot ไม่ได้ตัดเบอร์โทร/อีเมล → ให้แก้ทั้งโค้ด, SKILL.md และ eval เคส 8
+- เทียบ validation กับแผนแล้วพบว่า rejectReason เป็นข้อความอิสระ ไม่ตรงกับ feedback loop ที่ต้องนับสถิติ → ให้เปลี่ยนเป็น enum 4 ค่า + note
+- ขอให้กันการกด Accept ซ้ำ/พร้อมกันด้วยเงื่อนไข status = 'pending' พร้อมเทสต์ concurrent
+- agent แจ้งว่า .env.example มี LEAD_INTAKE_API_KEY จริงที่ commit ไปแล้ว → rotate key ทันที (.env.local + Vercel) และให้เพิ่ม pnpm check:env ใน lint กันเกิดซ้ำ
+- ตั้ง spending limit ใน Anthropic Console ($10/เดือน, ปิด auto-reload) และเลือก claude-haiku-5-5 เพื่อคุมค่าใช้จ่าย

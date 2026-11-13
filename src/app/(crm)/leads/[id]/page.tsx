@@ -4,38 +4,24 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { z } from "zod";
 import { SourceBadge, StageBadge } from "@/components/badges";
+import { AiPanel, type PanelSuggestion } from "@/components/ai-panel";
 import { EntityForm } from "@/components/entity-form";
 import { NoteForm } from "@/components/note-form";
+import { describeTimelineItem } from "@/lib/timeline";
 import { PageHeader } from "@/components/page-header";
 import { StageSelect } from "@/components/stage-select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireUser } from "@/server/auth";
 import { getDb } from "@/server/db/client";
 import { AppError } from "@/server/errors";
+import { getLatestSuggestion } from "@/server/services/ai-suggestions";
 import { companyOptions } from "@/server/services/companies";
-import { getLeadDetail, salesUsers, type TimelineItem } from "@/server/services/leads";
+import { getLeadDetail, salesUsers } from "@/server/services/leads";
 
 export const metadata = { title: "Lead" };
 export const dynamic = "force-dynamic";
 
 const fmt = (d: Date) => d.toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Bangkok" });
-
-function describe(item: TimelineItem): { label: string; text: string } {
-  if (item.kind === "message") {
-    return { label: `Message ${item.direction === "in" ? "received" : "out"} (${item.status})`, text: item.body };
-  }
-  const p = item.payload as Record<string, unknown>;
-  switch (item.type) {
-    case "stage_change":
-      return { label: "Stage changed", text: `${String(p.from)} → ${String(p.to)}${p.lostReason ? ` (reason: ${String(p.lostReason)})` : ""}` };
-    case "note":
-      return { label: p.system ? "System" : "Note", text: String(p.text ?? "") };
-    case "call":
-      return { label: "Call", text: String(p.text ?? "") };
-    default:
-      return { label: item.type.replaceAll("_", " "), text: typeof p.text === "string" ? p.text : "" };
-  }
-}
 
 export default async function LeadDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireUser();
@@ -50,7 +36,17 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
     if (err instanceof AppError && err.code === "NOT_FOUND") notFound();
     throw err;
   }
-  const [companies, owners] = await Promise.all([companyOptions(db), salesUsers(db)]);
+  const [companies, owners, latest] = await Promise.all([companyOptions(db), salesUsers(db), getLatestSuggestion(db, id.data)]);
+  const panelSuggestion: PanelSuggestion | null = latest && {
+    id: latest.id,
+    status: latest.status,
+    source: latest.source,
+    model: latest.model,
+    output: latest.originalOutput as PanelSuggestion["output"],
+    finalOutput: latest.finalOutput as PanelSuggestion["finalOutput"],
+    rejectReason: latest.rejectReason,
+    rejectNote: latest.rejectNote,
+  };
   const { lead, contact, company, ownerName, timeline } = detail;
 
   return (
@@ -121,7 +117,16 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
           </Card>
         </div>
 
-        <Card className="lg:col-span-2">
+        <div className="space-y-4 lg:col-span-2">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">AI copilot</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <AiPanel key={panelSuggestion?.id ?? "none"} leadId={lead.id} suggestion={panelSuggestion} />
+          </CardContent>
+        </Card>
+        <Card>
           <CardHeader>
             <CardTitle className="text-base">Timeline</CardTitle>
           </CardHeader>
@@ -129,7 +134,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
             <NoteForm leadId={lead.id} />
             <ol className="space-y-4 border-l pl-4">
               {timeline.map((item) => {
-                const d = describe(item);
+                const d = describeTimelineItem(item);
                 return (
                   <li key={`${item.kind}-${item.id}`} className="relative">
                     <span className="absolute -left-[21px] top-1.5 size-2.5 rounded-full bg-primary" aria-hidden />
@@ -146,6 +151,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
             </ol>
           </CardContent>
         </Card>
+        </div>
       </div>
     </>
   );

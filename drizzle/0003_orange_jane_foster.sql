@@ -1,0 +1,3 @@
+ALTER TABLE "ai_suggestions" ADD COLUMN "reject_note" text;--> statement-breakpoint
+ALTER TABLE "ai_suggestions" ADD CONSTRAINT "ai_suggestions_reject_reason_check" CHECK ("ai_suggestions"."reject_reason" IS NULL OR ("ai_suggestions"."status" = 'dismissed' AND "ai_suggestions"."reject_reason" IN ('wrong_facts', 'wrong_tone', 'missing_info', 'wrong_action')));--> statement-breakpoint
+ALTER TABLE "ai_suggestions" ADD CONSTRAINT "ai_suggestions_reject_note_length_check" CHECK ("ai_suggestions"."reject_note" IS NULL OR length("ai_suggestions"."reject_note") <= 500);

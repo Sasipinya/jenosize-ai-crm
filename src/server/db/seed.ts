@@ -225,6 +225,7 @@ export async function seedDatabase(db: Db, opts: SeedOptions): Promise<SeedResul
     await tx.insert(appSettings).values([
       { key: "simulate_ai_down", value: false },
       { key: "simulate_line_down", value: false },
+      { key: "fewshot_enabled", value: true },
     ]);
   });
 

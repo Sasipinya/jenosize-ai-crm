@@ -40,6 +40,7 @@ export const MESSAGE_DIRECTIONS = ["in", "out"] as const;
 export const MESSAGE_STATUSES = ["draft", "approved", "sent", "failed"] as const;
 export const AI_SOURCES = ["llm", "fallback"] as const;
 export const AI_STATUSES = ["pending", "accepted", "edited", "dismissed"] as const;
+export const AI_REJECT_REASONS = ["wrong_facts", "wrong_tone", "missing_info", "wrong_action"] as const;
 
 export type Role = (typeof ROLES)[number];
 export type PoliteParticle = (typeof POLITE_PARTICLES)[number];
@@ -206,7 +207,8 @@ export const aiSuggestions = pgTable(
     model: text("model"),
     promptVersion: text("prompt_version").notNull(),
     status: text("status", { enum: AI_STATUSES }).notNull().default("pending"),
-    rejectReason: text("reject_reason"),
+    rejectReason: text("reject_reason", { enum: AI_REJECT_REASONS }),
+    rejectNote: text("reject_note"),
     decidedBy: uuid("decided_by").references(() => users.id),
     decidedAt: timestamp("decided_at", { withTimezone: true }),
     createdAt: createdAt(),
@@ -215,6 +217,11 @@ export const aiSuggestions = pgTable(
   (t) => [
     check("ai_suggestions_source_check", sql`${t.source} IN (${inList(AI_SOURCES)})`),
     check("ai_suggestions_status_check", sql`${t.status} IN (${inList(AI_STATUSES)})`),
+    check(
+      "ai_suggestions_reject_reason_check",
+      sql`${t.rejectReason} IS NULL OR (${t.status} = 'dismissed' AND ${t.rejectReason} IN (${inList(AI_REJECT_REASONS)}))`,
+    ),
+    check("ai_suggestions_reject_note_length_check", sql`${t.rejectNote} IS NULL OR length(${t.rejectNote}) <= 500`),
     check(
       "ai_suggestions_decision_check",
       sql`${t.status} = 'pending' OR (${t.decidedBy} IS NOT NULL AND ${t.decidedAt} IS NOT NULL)`,

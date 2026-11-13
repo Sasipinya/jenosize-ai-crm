@@ -117,8 +117,16 @@ export async function getLeadDetail(db: Db, id: string) {
     db.select().from(messages).where(eq(messages.leadId, id)),
   ]);
 
+  // A message_received / message_sent activity only mirrors a message row (payload.messageId). The
+  // message row is the one we show, so drop the mirror; an activity with no matching row stays.
+  const messageIds = new Set(msgs.map((m) => m.id));
+  const mirrorsMessage = (a: typeof activities.$inferSelect) =>
+    (a.type === "message_received" || a.type === "message_sent") &&
+    typeof a.payload.messageId === "string" &&
+    messageIds.has(a.payload.messageId);
+
   const timeline: TimelineItem[] = [
-    ...acts.map((r): TimelineItem => ({
+    ...acts.filter((r) => !mirrorsMessage(r.a)).map((r): TimelineItem => ({
       kind: "activity",
       id: r.a.id,
       at: r.a.createdAt,
