@@ -43,9 +43,9 @@ As of 2026-11-10 · Sspy
 
 | วัน | ธีม | ชม. ตามแผน | ชม. จริง |
 | --- | --- | --- | --- |
-| 1 | วางฐาน, layout responsive, deploy | 3 |  |
-| 2 | CRM core: leads, companies, contacts, เว็บไซต์ | 3.75 |  |
-| 3 | AI skill + feedback loop | 3.25 |  |
+| 1 | วางฐาน, layout responsive, deploy | 3 | 2.30 |
+| 2 | CRM core: leads, companies, contacts, เว็บไซต์ | 3.75 | 0.5 |
+| 3 | AI skill + feedback loop | 3.25 | 2.2 |
 | 4 | LINE + PDPA consent + Quick Reply | 3.5 |  |
 | 5 | Demo panel, PDPA erase, เช็ค responsive, handover, วิดีโอ | 2.5 |  |
 

@@ -116,3 +116,4 @@ One entry per task. The agent fills in everything except `Human review:`, which 
 - I had said earlier that code used the lead owner's particle: it actually used the person who clicked; fixed.
 
 **Human review:**
+ทดสอบบน production เจอ draft ใช้ ครับ/ค่ะ ปนกัน (eval ไม่จับ) → ให้บังคับในโค้ดและเพิ่ม eval เคส 13 ยืนยันบนเว็บจริงว่าแก้แล้ว และกำหนดเวลาให้งาน hardening ไม่ให้ลากยาว
