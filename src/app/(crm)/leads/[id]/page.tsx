@@ -9,6 +9,7 @@ import { EntityForm } from "@/components/entity-form";
 import { LineComposer } from "@/components/line-composer";
 import { RetryButton } from "@/components/retry-button";
 import { NoteForm } from "@/components/note-form";
+import { acceptedDraftFor } from "@/lib/line-draft";
 import { describeTimelineItem } from "@/lib/timeline";
 import { PageHeader } from "@/components/page-header";
 import { StageSelect } from "@/components/stage-select";
@@ -51,11 +52,13 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
   };
   const { lead, contact, company, ownerName, timeline } = detail;
   const canLine = Boolean(contact.lineUserId) && !contact.erasedAt;
-  // Start the reply from the AI draft only after a person accepted it (accepted or edited).
-  const acceptedDraft =
-    latest && (latest.status === "accepted" || latest.status === "edited")
-      ? ((latest.finalOutput as PanelSuggestion["finalOutput"])?.draftReply ?? "")
-      : "";
+  // Derived from the data, not from composer state, so it survives the refresh after a failed send.
+  const failedLineCount = timeline.filter((i) => i.kind === "message" && i.direction === "out" && i.status === "failed").length;
+  // Start the reply from the AI draft only after a person accepted it, and only until a message was created from it.
+  const acceptedDraft = acceptedDraftFor(
+    latest && { status: latest.status, finalDraft: (latest.finalOutput as PanelSuggestion["finalOutput"])?.draftReply ?? null, decidedAt: latest.decidedAt },
+    timeline,
+  );
 
   return (
     <>
@@ -139,6 +142,13 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
             <CardTitle className="text-base">Timeline</CardTitle>
           </CardHeader>
           <CardContent className="space-y-6">
+            {canLine && failedLineCount > 0 && (
+              <p role="alert" className="rounded border border-destructive/40 bg-destructive/10 p-2 text-sm text-destructive">
+                {failedLineCount === 1
+                  ? "LINE did not accept a message. Use Retry on the failed message in the timeline below."
+                  : `LINE did not accept ${failedLineCount} messages. Use Retry on the failed messages in the timeline below.`}
+              </p>
+            )}
             {canLine && <LineComposer key={acceptedDraft} leadId={lead.id} initialText={acceptedDraft} />}
             <NoteForm leadId={lead.id} />
             <ol className="space-y-4 border-l pl-4">

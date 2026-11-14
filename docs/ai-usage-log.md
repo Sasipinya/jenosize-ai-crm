@@ -139,3 +139,23 @@ One entry per task. The agent fills in everything except `Human review:`, which 
 - Known, not fixed: two simultaneous first messages from a contact whose leads are all closed can create two leads; messages from an erased contact are still stored (no erasure flow yet); an `after()` task killed midway leaves events with `processed_at` and `error` both empty.
 
 **Human review:**
+
+## 2026-11-14 — Phase 4 follow-up: LINE double-send guard
+
+**Prompt summary:** Prod LINE test: after Approve & send, the reply box was prefilled with the accepted AI draft again, so the same message could be sent twice. Prefill only until a LINE message exists since the acceptance; server guard that rejects (409) an identical outbound text to the same lead within 60 s; then a second round: keep the failed-send error visible, use the database clock, run the same check on Retry.
+
+**Produced:**
+- `src/lib/line-draft.ts` (`acceptedDraftFor`, a message at or after the acceptance counts as used), used by the lead page; a persistent "LINE did not accept…" alert on the page, derived from the data, shown only when the contact can receive LINE.
+- `outbound.ts`: `rejectRecentDuplicate` for Send and Retry; lead row locked `FOR NO KEY UPDATE` (Send and Retry take lead then message); window is `now() - interval '60 seconds'` measured from the message's latest approval activity.
+- Tests: duplicate Send and concurrent Send, window passing, failed rows not blocking, Retry 409 and a Retry restarting the window, SQL-capture test for the database clock, prefill edge cases. SKILL.md Known limitations: page wiring untested, prefill clock skew.
+
+**Agent self-corrections worth reviewing:**
+- First guard measured the window from `messages.created_at`. The reviewer showed a Retry does not refresh it, so a just-retried old message escaped the guard; the window now uses the approval activity (no migration). My first clock test faked the app clock, but pglite's `now()` follows it, so it proved nothing; replaced by a SQL-capture test.
+- `FOR UPDATE` on the lead could deadlock with the foreign-key checks of the send transaction; changed to `FOR NO KEY UPDATE`.
+- Mutation checks: the Retry-window, database-clock and Retry-409 tests fail when their fix is removed. The concurrent-Send test does not prove the lead lock: pglite runs on one connection, so the two sends take turns anyway.
+
+**Known, not fixed:**
+- A failed message whose text was already re-sent by hand keeps the alert until it is retried or sent again after 60 s; Retry then sends the text a second time (accepted: a failed row never blocks).
+- Concurrency is reasoned from Postgres lock rules, not run on real Postgres (pglite serialises queries).
+
+**Human review:**

@@ -1,6 +1,8 @@
 // Outbound LINE: approval first, retry key reuse, backoff on 5xx/timeout, stop on 4xx, failed + Retry, simulate_line_down.
 import { and, count, eq } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { drizzle } from "drizzle-orm/pglite";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import * as schema from "@/server/db/schema";
 import { activities, appSettings, contacts, leads, messages, users } from "@/server/db/schema";
 import { DEMO_SALES_EMAIL, seedDatabase } from "@/server/db/seed";
 import { createMockLineAdapter } from "@/server/services/line/adapter";
@@ -27,7 +29,16 @@ afterAll(async () => {
   await t.close();
 });
 
-const setDown = (v: boolean) => t.db.insert(appSettings).values({ key: "simulate_line_down", value: v }).onConflictDoUpdate({ target: appSettings.key, set: { value: v } });
+/** pglite's now() follows the JS clock, so faking Date moves the database clock too: used to let the 60 s window pass. */
+async function withClock(fn: (advance: (ms: number) => void) => Promise<void>) {
+  vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
+  try {
+    await fn((ms) => vi.setSystemTime(Date.now() + ms));
+  } finally {
+    vi.useRealTimers();
+  }
+}
+const setDown =(v: boolean) => t.db.insert(appSettings).values({ key: "simulate_line_down", value: v }).onConflictDoUpdate({ target: appSettings.key, set: { value: v } });
 const acts = async (type: "note" | "message_sent") =>
   (await t.db.select({ n: count() }).from(activities).where(and(eq(activities.leadId, leadId), eq(activities.type, type))))[0]!.n;
 
@@ -96,6 +107,82 @@ describe("approveAndSend", () => {
   });
 });
 
+describe("double-send guard", () => {
+  it("rejects (409) the same text sent to the same lead within 60 s, and sends nothing", async () => {
+    const adapter = createMockLineAdapter();
+    await approveAndSend(t.db, actor, { leadId, body: "dup guard text" }, deps(adapter));
+    const before = await t.db.select().from(messages).where(eq(messages.leadId, leadId));
+    await expect(approveAndSend(t.db, actor, { leadId, body: "dup guard text" }, deps(adapter))).rejects.toMatchObject({ code: "CONFLICT", status: 409 });
+    expect(adapter.outbox).toHaveLength(1);
+    expect(await t.db.select().from(messages).where(eq(messages.leadId, leadId))).toHaveLength(before.length);
+  });
+
+  it("two simultaneous identical sends: one goes out, one is rejected", async () => {
+    const adapter = createMockLineAdapter();
+    const results = await Promise.allSettled([
+      approveAndSend(t.db, actor, { leadId, body: "double click" }, deps(adapter)),
+      approveAndSend(t.db, actor, { leadId, body: "double click" }, deps(adapter)),
+    ]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect(adapter.outbox).toHaveLength(1);
+  });
+
+  it("different text is allowed, and the same text is allowed again after the window", async () => {
+    const adapter = createMockLineAdapter();
+    await withClock(async (advance) => {
+      await approveAndSend(t.db, actor, { leadId, body: "window text" }, deps(adapter));
+      await approveAndSend(t.db, actor, { leadId, body: "window text 2" }, deps(adapter));
+      advance(120_000);
+      const again = await approveAndSend(t.db, actor, { leadId, body: "window text" }, deps(adapter));
+      expect(again.status).toBe("sent");
+    });
+  });
+
+  it("a Retry restarts the window: the same text is blocked after an OLD failed message was just retried", async () => {
+    const adapter = createMockLineAdapter();
+    await withClock(async (advance) => {
+      adapter.failNext("http_400", "http_400");
+      const f1 = await approveAndSend(t.db, actor, { leadId, body: "old failed text" }, deps(adapter)); // t0
+      advance(300_000);
+      const f2 = await approveAndSend(t.db, actor, { leadId, body: "old failed text" }, deps(adapter)); // a failed row does not block
+      expect([f1.status, f2.status]).toEqual(["failed", "failed"]);
+
+      expect((await retryMessage(t.db, actor, f1.id, deps(adapter))).status).toBe("sent"); // f1 is 5 minutes old
+      // The second Retry and a fresh Send of the same text must both be refused: f1 was approved seconds ago.
+      await expect(retryMessage(t.db, actor, f2.id, deps(adapter))).rejects.toMatchObject({ code: "CONFLICT" });
+      await expect(approveAndSend(t.db, actor, { leadId, body: "old failed text" }, deps(adapter))).rejects.toMatchObject({ code: "CONFLICT" });
+      expect(adapter.outbox).toHaveLength(1);
+
+      advance(120_000); // the window passes
+      expect((await retryMessage(t.db, actor, f2.id, deps(adapter))).status).toBe("sent");
+    });
+  });
+
+  it("the 60 s window is computed by the database (now()), not from the app clock", async () => {
+    // pglite's now() follows the JS clock, so skewing the app clock cannot be simulated here. Instead, capture the
+    // SQL: the window must be `now() - interval '60 seconds'`, and no timestamp may be sent as a parameter.
+    const queries: { sql: string; params: unknown[] }[] = [];
+    const spyDb = drizzle(t.client, { schema, logger: { logQuery: (sql, params) => void queries.push({ sql, params }) } });
+    const adapter = createMockLineAdapter();
+    await approveAndSend(spyDb, actor, { leadId, body: "clock source text" }, deps(adapter));
+    const guard = queries.find((q) => q.sql.includes('from "messages"') && q.sql.includes("interval '60 seconds'"));
+    expect(guard, "duplicate-check query not found").toBeDefined();
+    expect(guard!.sql).toContain("now() - interval '60 seconds'");
+    expect(guard!.params.some((p) => p instanceof Date || (typeof p === "string" && /^\d{4}-\d{2}-\d{2}T/.test(p)))).toBe(false);
+    // And it still blocks.
+    await expect(approveAndSend(spyDb, actor, { leadId, body: "clock source text" }, deps(adapter))).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
+  it("a failed message does not block re-sending the same text", async () => {
+    const adapter = createMockLineAdapter();
+    adapter.failNext("http_400");
+    const failed = await approveAndSend(t.db, actor, { leadId, body: "failed then again" }, deps(adapter));
+    expect(failed.status).toBe("failed");
+    const again = await approveAndSend(t.db, actor, { leadId, body: "failed then again" }, deps(adapter));
+    expect(again.status).toBe("sent");
+  });
+});
+
 describe("retry", () => {
   it("Retry reuses the SAME retry key, ends sent, and LINE gets one message", async () => {
     const adapter = createMockLineAdapter();
@@ -117,6 +204,21 @@ describe("retry", () => {
     const retried = await retryMessage(t.db, actor, sent.id, deps(adapter));
     expect(retried.status).toBe("sent");
     expect(adapter.outbox).toHaveLength(1);
+  });
+
+  it("Retry is rejected (409) when an identical message was already sent within 60 s", async () => {
+    const adapter = createMockLineAdapter();
+    adapter.failNext("http_400");
+    const failed = await approveAndSend(t.db, actor, { leadId, body: "retry dup text" }, deps(adapter));
+    expect(failed.status).toBe("failed");
+    const resent = await approveAndSend(t.db, actor, { leadId, body: "retry dup text" }, deps(adapter)); // allowed: a failed row does not block
+    expect(resent.status).toBe("sent");
+
+    await expect(retryMessage(t.db, actor, failed.id, deps(adapter))).rejects.toMatchObject({ code: "CONFLICT", status: 409 });
+    const [still] = await t.db.select().from(messages).where(eq(messages.id, failed.id));
+    expect(still!.status).toBe("failed"); // untouched: Retry stays available
+    expect(adapter.outbox).toHaveLength(1);
+
   });
 
   it("only a failed message can be retried", async () => {

@@ -2,10 +2,10 @@
 // as `approved` (approved_by + a note activity in one transaction), and only then does the push run. AI code
 // never calls this file. The retry key is created with the message and reused on every attempt and on Retry.
 import { randomUUID } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, gt, inArray, sql } from "drizzle-orm";
 import type { SendMessageInput } from "@/lib/validation/line";
 import type { Db } from "../../db/client";
-import { contacts, leads, messages } from "../../db/schema";
+import { activities, contacts, leads, messages } from "../../db/schema";
 import { AppError } from "../../errors";
 import { logger } from "../../logger";
 import { addActivity } from "../activities";
@@ -14,6 +14,37 @@ import type { Actor } from "../leads";
 import type { LineAdapter } from "./adapter";
 import { postbackData, QUICK_REPLIES, QUICK_REPLY_ACTIONS } from "./notice";
 import { pushWithRetry } from "./push";
+
+/**
+ * Double-send guard, used by Send and Retry: 409 when an identical outbound message for this lead was sent or is
+ * pending (`approved`) in the last 60 seconds. The window uses the database clock (now() against the
+ * activities.created_at default), so app/database clock skew cannot open it. Call with the lead row locked.
+ * INVARIANT: this relies on every approval writing a `note` activity with payload.messageId in the same
+ * transaction (approveAndSend and retryMessage). Any new code that sets a message to `approved` must do the same.
+ */
+async function rejectRecentDuplicate(tx: Pick<Db, "select">, leadId: string, body: string): Promise<void> {
+  // The window runs from the message's latest APPROVAL, not from messages.created_at: a Retry re-approves an old
+  // row, so created_at would miss it. Every approval and every Retry writes a system `note` activity carrying
+  // payload.messageId, stamped by the database.
+  const [dup] = await tx
+    .select({ id: messages.id })
+    .from(messages)
+    .innerJoin(
+      activities,
+      and(eq(activities.leadId, messages.leadId), eq(activities.type, "note"), sql`${activities.payload}->>'messageId' = ${messages.id}::text`),
+    )
+    .where(
+      and(
+        eq(messages.leadId, leadId),
+        eq(messages.direction, "out"),
+        inArray(messages.status, ["approved", "sent"]),
+        eq(messages.body, body),
+        gt(activities.createdAt, sql`now() - interval '60 seconds'`),
+      ),
+    )
+    .limit(1);
+  if (dup) throw new AppError("CONFLICT", "This exact message was already sent to this lead in the last minute");
+}
 
 type MessageRow = typeof messages.$inferSelect;
 type Deps = { adapter: LineAdapter; sleep?: (ms: number) => Promise<void>; backoffMs?: number[] };
@@ -80,9 +111,12 @@ async function pushAndRecord(db: Db, deps: Deps, msg: MessageRow): Promise<Messa
 /** Creates the message as approved by `actor`, then sends it. Returns the stored row (`sent` or `failed`). */
 export async function approveAndSend(db: Db, actor: Actor, input: SendMessageInput, deps: Deps): Promise<MessageRow> {
   const approved = await db.transaction(async (tx) => {
-    const [lead] = await tx.select({ id: leads.id, contactId: leads.contactId }).from(leads).where(eq(leads.id, input.leadId)).limit(1);
+    // Lock the lead so two simultaneous identical sends are checked one after the other (the second sees the first).
+    // NO KEY UPDATE, not UPDATE: it still serialises senders but does not block the foreign-key checks of other inserts.
+    const [lead] = await tx.select({ id: leads.id, contactId: leads.contactId }).from(leads).where(eq(leads.id, input.leadId)).for("no key update").limit(1);
     if (!lead) throw new AppError("NOT_FOUND", "Lead not found");
     await lineUserIdOf(tx, lead.contactId); // refuse before anything is stored
+    await rejectRecentDuplicate(tx, lead.id, input.body);
     const [msg] = await tx
       .insert(messages)
       .values({ leadId: lead.id, contactId: lead.contactId, direction: "out", body: input.body, status: "approved", approvedBy: actor.id, retryKey: randomUUID() })
@@ -101,10 +135,15 @@ export async function approveAndSend(db: Db, actor: Actor, input: SendMessageInp
 /** Retry button: only a failed message, re-approved by whoever clicks, with the same retry key. */
 export async function retryMessage(db: Db, actor: Actor, messageId: string, deps: Deps): Promise<MessageRow> {
   const reapproved = await db.transaction(async (tx) => {
+    // Same lock order as approveAndSend (lead first, then the message), so a Send and a Retry cannot deadlock.
+    const [peek] = await tx.select({ leadId: messages.leadId }).from(messages).where(eq(messages.id, messageId)).limit(1);
+    if (!peek) throw new AppError("NOT_FOUND", "Message not found");
+    await tx.select({ id: leads.id }).from(leads).where(eq(leads.id, peek.leadId)).for("no key update");
     const [current] = await tx.select().from(messages).where(eq(messages.id, messageId)).for("update").limit(1);
     if (!current || current.direction !== "out") throw new AppError("NOT_FOUND", "Message not found");
     if (current.status !== "failed") throw new AppError("CONFLICT", `Only a failed message can be retried (this one is ${current.status})`);
     await lineUserIdOf(tx, current.contactId);
+    await rejectRecentDuplicate(tx, current.leadId, current.body);
     const [row] = await tx
       .update(messages)
       .set({ status: "approved", approvedBy: actor.id })
