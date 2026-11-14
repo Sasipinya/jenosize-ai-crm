@@ -159,3 +159,8 @@ One entry per task. The agent fills in everything except `Human review:`, which 
 - Concurrency is reasoned from Postgres lock rules, not run on real Postgres (pglite serialises queries).
 
 **Human review:**
+Human review: พบ bug ส่งข้อความซ้ำตอนทดสอบ LINE จริงบน production
+(หลังส่งแล้วโหลดหน้าใหม่ draft กลับมาและกดส่งซ้ำได้) agent ไม่ได้ทดสอบกรณีนี้
+สั่งแก้ทั้งฝั่งหน้าจอ (ไม่เติม draft หลังส่งแล้ว) และฝั่ง server (409 ถ้าข้อความเดิมภายใน 60 วินาที รวม Retry)
+ตัดสินใจไม่แก้กรณี failed → ส่งเองซ้ำ → Retry เพราะเกิดยาก บันทึกเป็น known limitation
+ทดสอบในเบราว์เซอร์และ LINE จริงเอง
