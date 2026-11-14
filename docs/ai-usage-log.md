@@ -117,3 +117,25 @@ One entry per task. The agent fills in everything except `Human review:`, which 
 
 **Human review:**
 ทดสอบบน production เจอ draft ใช้ ครับ/ค่ะ ปนกัน (eval ไม่จับ) → ให้บังคับในโค้ดและเพิ่ม eval เคส 13 ยืนยันบนเว็บจริงว่าแก้แล้ว และกำหนดเวลาให้งาน hardening ไม่ให้ลากยาว
+## 2026-11-14 — Phase 4: LINE (webhook, mapping, PDPA notice, outbound, Quick Reply)
+
+**Prompt summary:** Plan first, then build after "go". Webhook with raw-body HMAC verify and `ON CONFLICT DO NOTHING` dedupe, respond fast and process after; map LINE user to contact + lead (placeholder name if the profile call fails); PDPA notice on first message recorded as a `consent` activity plus `consent_at`; outbound only after human approval with `X-Line-Retry-Key`, backoff on 5xx/timeout, stop on 4xx, failed + Retry, `simulate_line_down`; Quick Reply postbacks; mock adapter by default; simulate script; R24c tests.
+
+**Produced:**
+- `src/server/services/line/{signature,notice,adapter,push,inbound,outbound,webhook}.ts`, `src/lib/validation/line.ts`.
+- Routes `POST /api/webhooks/line`, `POST /api/messages`, `POST /api/messages/:id/retry`; `LineComposer` and `RetryButton` on the lead page.
+- `scripts/simulate-line-webhook.ts` (`pnpm line:simulate`, localhost only), `.env.example` (`APP_URL`, `LINE_ADAPTER`, `LINE_CHANNEL_SECRET`, `LINE_CHANNEL_ACCESS_TOKEN`), logger redact paths.
+- `docs/pdpa-line-notice.md` (why the one automatic reply is allowed; notice-based, not explicit opt-in, not legal advice).
+- `tests/line-webhook.test.ts`, `tests/line-outbound.test.ts`. No migration, no new dependency (LINE called with `fetch`).
+
+**Agent decisions worth reviewing:**
+- LINE payload shapes, the push endpoint, `X-Line-Retry-Key` and "409 = key already accepted" are written from memory of the LINE docs; verify against the Messaging API reference before the first real run.
+- Notice is stored as an activity only; `consent_at` is set only after LINE accepts the notice.
+- A failed event can be reprocessed by a redelivery (claimed once); other duplicates are skipped.
+- Postback: every tap logs a `quick_reply` activity, but a button moves the score only once per lead (later taps record `scoreChanged: false`); a lead with no score starts at 50. (First version ignored taps within 60 s; changed on the owner's request.)
+- New LINE leads are owned by the user in `LINE_DEFAULT_OWNER_EMAIL`; if unset or unknown, the first (oldest) sales user; an existing contact's own owner wins. (First version left them unowned; changed on the owner's request. Not re-reviewed.)
+- Approval is recorded as a system `note` activity (no new activity type, so no migration).
+- Reviewer pass: FAIL on one blocking issue (a message could stay `approved` forever if sending threw). Fixed: an unexpected error now moves it to `failed` so Retry works (test added). Also fixed: placeholder channel secret rejected, 429 no longer retried (spec: stop on 4xx), a reprocessed event no longer stores its message twice, notice errors no longer fail the event, a postback without `mid` ignores closed leads. These fixes and the score-once change were not re-reviewed (one reviewer pass per phase, as instructed).
+- Known, not fixed: two simultaneous first messages from a contact whose leads are all closed can create two leads; messages from an erased contact are still stored (no erasure flow yet); an `after()` task killed midway leaves events with `processed_at` and `error` both empty.
+
+**Human review:**

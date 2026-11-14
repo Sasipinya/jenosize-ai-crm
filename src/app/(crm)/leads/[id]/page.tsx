@@ -6,6 +6,8 @@ import { z } from "zod";
 import { SourceBadge, StageBadge } from "@/components/badges";
 import { AiPanel, type PanelSuggestion } from "@/components/ai-panel";
 import { EntityForm } from "@/components/entity-form";
+import { LineComposer } from "@/components/line-composer";
+import { RetryButton } from "@/components/retry-button";
 import { NoteForm } from "@/components/note-form";
 import { describeTimelineItem } from "@/lib/timeline";
 import { PageHeader } from "@/components/page-header";
@@ -48,6 +50,12 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
     rejectNote: latest.rejectNote,
   };
   const { lead, contact, company, ownerName, timeline } = detail;
+  const canLine = Boolean(contact.lineUserId) && !contact.erasedAt;
+  // Start the reply from the AI draft only after a person accepted it (accepted or edited).
+  const acceptedDraft =
+    latest && (latest.status === "accepted" || latest.status === "edited")
+      ? ((latest.finalOutput as PanelSuggestion["finalOutput"])?.draftReply ?? "")
+      : "";
 
   return (
     <>
@@ -131,6 +139,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
             <CardTitle className="text-base">Timeline</CardTitle>
           </CardHeader>
           <CardContent className="space-y-6">
+            {canLine && <LineComposer key={acceptedDraft} leadId={lead.id} initialText={acceptedDraft} />}
             <NoteForm leadId={lead.id} />
             <ol className="space-y-4 border-l pl-4">
               {timeline.map((item) => {
@@ -142,6 +151,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
                       <span className="font-medium text-foreground">{d.label}</span>
                       <span>{item.kind === "activity" ? (item.actorName ?? "System") : ""}</span>
                       <time dateTime={item.at.toISOString()}>{fmt(item.at)}</time>
+                      {item.kind === "message" && item.direction === "out" && item.status === "failed" && <RetryButton messageId={item.id} />}
                     </div>
                     {d.text && <p className="mt-0.5 whitespace-pre-wrap break-words text-sm">{d.text}</p>}
                   </li>
