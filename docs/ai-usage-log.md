@@ -269,6 +269,7 @@ AI ขึ้น score เองเพราะเห็นการกดปุ�
 **Known, not fixed:** `src/server/logger.ts` still has a stale comment ("request logging is wired in Phase 5") although `http.ts` already logs requests. The `/api/health` route is listed as public in the guard but does not exist.
 
 **Human review:**
+Hours: 0.8h (15 Nov 21:33–22:20)
 
 
 ## 2026-11-15 — Phase 5 nice-to-have: CI workflow and GET /api/health
@@ -287,6 +288,7 @@ AI ขึ้น score เองเพราะเห็นการกดปุ�
 - The workflow was not run on GitHub: only the same commands were run locally (Node 26, not 22).
 
 **Human review:**
+reviewer พบว่า line.configured ขึ้น ok ทั้งที่ไม่มี channel secret จึงให้เช็กทั้ง token และ secret / เพิ่ม connectionTimeoutMillis / ตรวจ /api/health บน production เอง: db ok, ai claude-haiku-5-5, line real, version ตรงกับ commit
 reviewer พบว่า line.configured เป็น ok ทั้งที่ไม่มี channel secret จึงแก้ให้เช็กทั้งสองค่า, เพิ่ม connection timeout, CI ผ่านรอบแรกบน GitHub
 
 ## 2026-11-15 — Full-history secret scan, README limitation, gitleaks in CI
@@ -304,3 +306,4 @@ reviewer พบว่า line.configured เป็น ok ทั้งที่�
 **Known, not fixed:** the CI job itself has not run on GitHub (only the same command locally, Go 1.27, Windows). History is not rewritten, so the old key stays in git history and on the remote.
 
 **Human review:**
+ยืนยันเองบน production ว่า key เก่าใน history ได้ 401 จึงไม่ rewrite history และบันทึกเป็น known limitation / agent เผลอแสดง key เก่าใน terminal ตอนตรวจ ไม่มีความเสี่ยงเพราะ rotate แล้ว / เพิ่ม gitleaks ใน CI กัน secret ใหม่หลุด / CI ผ่านทั้ง 2 job บน GitHub

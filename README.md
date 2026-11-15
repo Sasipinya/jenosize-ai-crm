@@ -141,8 +141,8 @@ The plan is 16 h ([docs/plan.md](docs/plan.md)). Actual hours are the owner's ow
 | 3 AI skill + feedback loop | 3.25 h | 2.2 h | |
 | 4 LINE + PDPA + Quick Reply | 3.5 h | 1.3 h | Matches the log's 1.3 h line (double-send fix and real LINE test, 14 Nov 20:30–21:45) |
 | Prod-test fixes (Thai-only output, score on Accept, no gendered wording, quick-reply double count, eval pattern changes) | not planned | 1.4 h | 15 Nov, 10:44–12:05 |
-| 5 Handover | 2.5 h | in progress | Owner will fill in |
-| **Total so far (phases 1–4 + prod-test fixes)** | 13.5 h (phases 1–4) of 16 h | **7.5 h** | Excludes Phase 5 |
+| 5 Handover | 2.5 h | 0.8 h | 15 Nov, 21:33–22:20 |
+| **Total (phases 1–5 + prod-test fixes)** | 16 h | **8.3 h** | 7.5 h before Phase 5 + 0.8 h |
 
 Planning and research time (reading docs, account setup, designing the plan) is not counted.
 
