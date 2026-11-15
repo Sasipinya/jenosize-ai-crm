@@ -183,3 +183,18 @@ Hours: 1.3h (14 Nov 20:30–21:45) รวมทดสอบ LINE จริงแ
 - Mock eval cannot show that the real model stops drifting; run `pnpm eval --adapter claude` yourself to check.
 
 **Human review:**
+ พบ 3 ปัญหาจากการทดสอบ LINE จริงบน production (summary สลับภาษา, Accept แล้ว score ทับคะแนนจาก Quick Reply, AI เดาเพศลูกค้าจาก "ค่ะ")
+ตัดสินใจให้ Edit ใช้ score ที่เซลส์พิมพ์เองตรง ๆ ไม่บวกเพิ่ม
+ตรวจแล้วว่า test ที่เปลี่ยนแค่ข้อความเป็นภาษาไทย ไม่ได้ทำให้หลวมลง
+รัน eval กับ Claude จริงเอง: รอบแรก 15/16 (case 2 regex แคบเกินไป แก้แล้ว)
+
+## 2026-11-15 — Eval case 2: reason pattern widened after a real-model run
+
+**Prompt summary:** Real-model eval (claude-haiku-5-5, prompt v4) passed 15/16. Case 2 (proposal silent for 21 days) failed only on wording: the Thai scoreReasons said "ไม่มีการตอบกลับ" (no reply), which is correct, but the `reasonMatch` pattern only accepted ไม่มีการติดต่อ|เงียบ and English words. Since v4 forces Thai reasons, the pattern needed Thai equivalents.
+
+**Produced:** Case 2 `reasonMatch` pattern widened (after a real-model run, not before) with ไม่มีการตอบกลับ|ไม่ได้รับการตอบกลับ|ไม่มีความคืบหน้า|ไม่มีการติดตาม. No other check or case changed; the case has no check on the day count (21 days is only in its input). The model output was not wrong, the expectation was too narrow.
+
+**Known:** A wider pattern is a looser check: it now also accepts "no progress" and "no follow-up" as evidence of silence. The model's score, action and due-day checks for case 2 are unchanged.
+
+**Human review:**
+ขยาย regex หลังจากเห็น output จริงว่าความหมายถูก ไม่ใช่ปรับ test ให้ผ่านเฉย ๆ

@@ -31,7 +31,7 @@
     },
     "checks": [
       { "type": "scoreAtMost", "max": 60 },
-      { "type": "reasonMatch", "pattern": "quiet|silent|no contact|no response|ไม่มีการติดต่อ|เงียบ" },
+      { "type": "reasonMatch", "pattern": "quiet|silent|no contact|no response|ไม่มีการติดต่อ|เงียบ|ไม่มีการตอบกลับ|ไม่ได้รับการตอบกลับ|ไม่มีความคืบหน้า|ไม่มีการติดตาม" },
       { "type": "actionIn", "values": ["call"] },
       { "type": "dueInDaysAtMost", "max": 3 }
     ]
