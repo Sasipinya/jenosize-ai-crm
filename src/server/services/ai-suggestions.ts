@@ -7,7 +7,7 @@ import { PROMPT_VERSION } from "../../../skills/crm-copilot/prompt";
 import { suggestionOutputSchema, type SuggestionOutput } from "../../../skills/crm-copilot/schema";
 import type { AiDecisionInput } from "@/lib/validation/ai";
 import type { Db } from "../db/client";
-import { activities, aiSuggestions, appSettings, leads, users } from "../db/schema";
+import { aiSuggestions, appSettings, leads, users } from "../db/schema";
 import { AppError } from "../errors";
 import { logger } from "../logger";
 import { addActivity } from "./activities";
@@ -15,7 +15,7 @@ import { adapterFromEnv, type LlmAdapter } from "./ai-adapters";
 import { buildContext, latestEventAt } from "./ai-context";
 import { generateSuggestion } from "./ai-generate";
 import { getLeadDetail, type Actor } from "./leads";
-import { QUICK_REPLIES, type QuickReplyAction } from "./line/notice";
+import { quickReplyBoost, quickReplyPayloads } from "./line/quick-reply-score";
 
 export type SuggestionRow = typeof aiSuggestions.$inferSelect;
 
@@ -145,25 +145,11 @@ export async function suggestForLead(
 }
 
 /**
- * Points the customer earned by tapping quick-reply buttons on this lead: the sum of the deltas of the taps that
- * changed the score (each button counts once). Read from the activity history, NOT from leads.score, so accepting a
- * suggestion again can never count a boost twice.
+ * Points the customer earned by tapping quick-reply buttons on this lead. Same rule as the postback handler
+ * (line/quick-reply-score.ts): each button once, only taps that changed the score, read from the activity history
+ * and NOT from leads.score, so accepting again can never count a boost twice.
  */
-export async function quickReplyBoostTotal(tx: Pick<Db, "select">, leadId: string): Promise<number> {
-  const rows = await tx
-    .select({ payload: activities.payload })
-    .from(activities)
-    .where(and(eq(activities.leadId, leadId), eq(activities.type, "quick_reply"), sql`${activities.payload}->>'scoreChanged' = 'true'`));
-  const seen = new Set<string>();
-  let total = 0;
-  for (const { payload } of rows) {
-    const action = (payload as { action?: unknown }).action;
-    if (typeof action !== "string" || !(action in QUICK_REPLIES) || seen.has(action)) continue;
-    seen.add(action);
-    total += QUICK_REPLIES[action as QuickReplyAction].delta;
-  }
-  return total;
-}
+export const quickReplyBoostTotal = async (tx: Pick<Db, "select">, leadId: string): Promise<number> => quickReplyBoost(await quickReplyPayloads(tx, leadId));
 
 /**
  * Accept / edit / dismiss a pending suggestion. Accept keeps the customer's quick-reply points on top of the AI

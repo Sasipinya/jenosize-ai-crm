@@ -210,3 +210,23 @@ Hours: 1.3h (14 Nov 20:30–21:45) รวมทดสอบ LINE จริงแ
 **Human review:** รัน eval กับ Claude จริง 2 รอบ ได้ 15/16 ทั้งสองรอบ แต่ fail คนละ case (case 2 และ 3) ทั้งที่ output ความหมายถูก
 ขยาย regex ครั้งเดียวแล้วหยุด เพราะ model ตอบไม่เหมือนเดิมทุกรอบ จึงบันทึกเป็น known limitation
 agent ท้วงว่าคำว่า "คำสั่ง" ที่เราเสนอกว้างเกินไป เราเห็นด้วยและตัดออก
+
+## 2026-11-15 — Accept button boost: one shared rule for "which taps count"
+
+**Prompt summary:** Prod: the Accept button said "AI 35 + quick replies 25 = 60" and the owner expected a boost of 15. First reading (mine) was that a repeated นัดคุย tap was counted twice. Checking the code showed the old sum already skipped repeat taps (`scoreChanged: false`) and counted each button once, so 25 = 10 + 15. The owner then found the real cause in the timeline: an AI suggestion accepted at 21:51 reset the score to 35 (the overwrite bug fixed earlier the same day), and ขอใบเสนอราคา then added +15 → 50. The weights are นัดคุย +10 and ขอใบเสนอราคา +15, so 25 is correct and the "expected 15" was wrong. Decision: table value, each button once, final score clamped to 0-100. Also asked: does Refresh bypass the cache when PROMPT_VERSION changed?
+
+**Produced:**
+- `src/server/services/line/quick-reply-score.ts`: one helper (`scoredQuickReplies`, `quickReplyBoost`, `quickReplyPayloads`) used by the postback handler (does this tap move the score?) and by Accept (how many points to keep on top of the AI score). The handler's SQL "already scored" check is replaced by it; behaviour is the same, one rule instead of two.
+- Tests: unit tests for the rule, the real webhook handler replaying นัดคุย, ขอใบเสนอราคา, นัดคุย again (boost 25 = what the handler added), Accept saving AI 35 + 25 = 60, clamping at 0 and 100, and a test that a cached suggestion from an older prompt version is not served. The cache key already included PROMPT_VERSION (`suggestForLead`), so no code change there.
+
+**Agent self-corrections worth reviewing:**
+- I first changed the boost to the recorded change (`scoreAfter - scoreBefore`) and wrote a test expecting 15 from hand-made rows. The reviewer failed it: the handler cannot write `request_quote 45→50`, the real-handler test still gave 25, and clamp-dependent boosts were a product decision nobody had made. That version was dropped; the owner chose the table value.
+- I did not prove the cause myself: the owner found it from the timeline. I had only shown the repeat tap was not the cause.
+
+**Known, not fixed:**
+- `ai-context.ts` still has its own check for which taps become `customer_action` events (counted taps only, no per-button dedupe); the handler guarantees one counted tap per button.
+- The Accept label is computed when the page loads, so a tap that arrives afterwards makes it stale; the saved score is read under the lead lock and is right.
+- The score the model gives may already reflect a tap it sees as a `customer_action` event; only prompt rule 12 asks it not to.
+
+**Human review:**
+เราเข้าใจผิดว่า 25 เป็นบั๊ก (คิดว่าควรเป็น 15) agent แก้ตามสมมติฐานนั้นก่อน แล้ว replay ลำดับจริงผ่าน webhook handler พบว่าได้ 25 reviewer ให้ FAIL กับเวอร์ชันนั้น เราจึงกลับไปดู Timeline และพบสาเหตุจริง: Accept ตอน 21:51 รีเซ็ต score เป็น 35 (บั๊ก score ทับที่แก้แล้ว) ตัดสินใจใช้ค่าคงที่ในตาราง แต่ละปุ่มนับครั้งเดียว และจำกัด 0–100

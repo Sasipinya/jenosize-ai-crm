@@ -3,8 +3,9 @@ import { and, count, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { activities, contacts, leads, lineEvents, messages, users } from "@/server/db/schema";
 import { AppError } from "@/server/errors";
+import { quickReplyBoostTotal } from "@/server/services/ai-suggestions";
 import { createMockLineAdapter } from "@/server/services/line/adapter";
-import { privacyNoticeText, postbackData } from "@/server/services/line/notice";
+import { privacyNoticeText, postbackData, SCORE_BASELINE } from "@/server/services/line/notice";
 import { signLineBody } from "@/server/services/line/signature";
 import { handleLineWebhook } from "@/server/services/line/webhook";
 import { createTestDb, type TestDb } from "./helpers/test-db";
@@ -270,6 +271,19 @@ describe("postback (Quick Reply)", () => {
     await t.db.update(leads).set({ score: 5 }).where(eq(leads.id, lead.id));
     await post([postbackEvent(userId, "action=not_interested")]);
     expect(await scoreOf(lead.id)).toBe(0);
+  });
+
+  it("the boost Accept keeps equals what the handler really added: two buttons and a repeat tap", async () => {
+    const lead = await leadFor(uid());
+    const userId = (await t.db.select().from(contacts).where(eq(contacts.id, lead.contactId)))[0]!.lineUserId!;
+    const start = (await scoreOf(lead.id)) ?? SCORE_BASELINE;
+    await post([postbackEvent(userId, "action=book_call")]);
+    await post([postbackEvent(userId, "action=request_quote")]);
+    await post([postbackEvent(userId, "action=book_call")]); // repeat: logged, score unchanged
+    expect(await countActs(lead.id, "quick_reply")).toBe(3);
+    const added = (await scoreOf(lead.id))! - start;
+    expect(await quickReplyBoostTotal(t.db, lead.id)).toBe(added);
+    expect(added).toBe(25);
   });
 
   it("unknown postback data changes nothing", async () => {

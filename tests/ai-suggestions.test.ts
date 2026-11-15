@@ -6,7 +6,8 @@ import { ruleBasedSuggestion } from "../skills/crm-copilot/fallback";
 import { aiSuggestions, activities, appSettings, contacts, leads, users } from "@/server/db/schema";
 import { seedDatabase, DEMO_SALES_EMAIL } from "@/server/db/seed";
 import { addNote, changeStage, createLead, type Actor } from "@/server/services/leads";
-import { decideSuggestion, suggestForLead } from "@/server/services/ai-suggestions";
+import { decideSuggestion, quickReplyBoostTotal, suggestForLead } from "@/server/services/ai-suggestions";
+import { PROMPT_VERSION } from "../skills/crm-copilot/prompt";
 import { suggestionOutputSchema } from "../skills/crm-copilot/schema";
 import { createTestDb, type TestDb } from "./helpers/test-db";
 
@@ -406,5 +407,56 @@ describe("accept keeps the customer's quick-reply points", () => {
     expect(r.cached).toBe(false);
     expect(adapter.calls[0]!.user).toContain("customer_action");
     expect(adapter.calls[0]!.user).toContain("นัดคุย");
+  });
+});
+
+describe("boost: a repeated tap is not counted again", () => {
+  const withScore = (score: number): LlmAdapter => ({
+    name: "mock",
+    model: "mock",
+    async generate(req) {
+      return { text: JSON.stringify({ ...ruleBasedSuggestion(req.context), score }), usage: ZERO_USAGE };
+    },
+  });
+  const logged = (leadId: string, action: string, scoreChanged: boolean) =>
+    t.db.insert(activities).values({ leadId, actorId: null, type: "quick_reply", payload: { action, scoreChanged, text: "tap" } });
+  const scoreOf = async (leadId: string) => (await t.db.select().from(leads).where(eq(leads.id, leadId)))[0]!.score;
+
+  it("นัดคุย, ขอใบเสนอราคา, then นัดคุย again: the boost is 25 (10 + 15), the repeat adds nothing; Accept saves AI 35 + 25 = 60", async () => {
+    const lead = await newLead("Repeated tap");
+    const { suggestion } = await suggestForLead(t.db, actor, lead.id, { adapter: withScore(35) });
+    await logged(lead.id, "book_call", true);
+    await logged(lead.id, "request_quote", true);
+    await logged(lead.id, "book_call", false); // "score unchanged"
+    expect(await quickReplyBoostTotal(t.db, lead.id)).toBe(25);
+    await decided(suggestion.id, { action: "accept" });
+    expect(await scoreOf(lead.id)).toBe(60);
+    const [act] = await t.db.select().from(activities).where(and(eq(activities.leadId, lead.id), eq(activities.type, "ai_accepted")));
+    expect(act!.payload).toMatchObject({ score: 60, aiScore: 35, boostTotal: 25 });
+  });
+
+  it("the final score is clamped to 0-100 after the boost is added", async () => {
+    const high = await newLead("Clamp high");
+    const s1 = await suggestForLead(t.db, actor, high.id, { adapter: withScore(90) });
+    await logged(high.id, "request_quote", true);
+    await decided(s1.suggestion.id, { action: "accept" });
+    expect(await scoreOf(high.id)).toBe(100); // 90 + 15 clamped
+    const low = await newLead("Clamp low");
+    const s2 = await suggestForLead(t.db, actor, low.id, { adapter: withScore(10) });
+    await logged(low.id, "not_interested", true);
+    await decided(s2.suggestion.id, { action: "accept" });
+    expect(await scoreOf(low.id)).toBe(0); // 10 - 20 clamped
+  });
+
+  it("a cached suggestion made with an older prompt version is not served: Refresh calls the model again", async () => {
+    const lead = await newLead("Old prompt version");
+    const adapter = createMockAdapter();
+    const first = await suggestForLead(t.db, actor, lead.id, { adapter });
+    expect((await suggestForLead(t.db, actor, lead.id, { adapter })).cached).toBe(true);
+    await t.db.update(aiSuggestions).set({ promptVersion: `${PROMPT_VERSION}-old` }).where(eq(aiSuggestions.id, first.suggestion.id));
+    const again = await suggestForLead(t.db, actor, lead.id, { adapter });
+    expect(again.cached).toBe(false);
+    expect(again.suggestion.id).not.toBe(first.suggestion.id);
+    expect(adapter.calls).toHaveLength(2);
   });
 });

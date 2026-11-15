@@ -2,16 +2,17 @@
 // transaction, send the one fixed privacy notice to a first-time user, and apply Quick Reply postbacks.
 // Customer text is stored as data only; nothing here calls the AI or replies with anything but the notice.
 import { createHash } from "node:crypto";
-import { and, desc, eq, isNull, notInArray, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, notInArray } from "drizzle-orm";
 import type { LineEvent } from "@/lib/validation/line";
 import type { Db } from "../../db/client";
-import { activities, contacts, leads, messages, users } from "../../db/schema";
+import { contacts, leads, messages, users } from "../../db/schema";
 import { logger } from "../../logger";
 import { addActivity } from "../activities";
 import { safeErr } from "../common";
 import type { LineAdapter } from "./adapter";
 import { parsePostback, privacyNoticeText, PRIVACY_NOTICE_VERSION, QUICK_REPLIES, SCORE_BASELINE } from "./notice";
 import { pushWithRetry } from "./push";
+import { quickReplyPayloads, scoredQuickReplies } from "./quick-reply-score";
 
 type Deps = { adapter: LineAdapter; env?: Record<string, string | undefined>; now?: Date; sleep?: (ms: number) => Promise<void>; backoffMs?: number[] };
 
@@ -129,11 +130,8 @@ async function applyPostback(db: Db, userId: string, ev: LineEvent) {
     const [locked] = await tx.select().from(leads).where(eq(leads.id, lead.id)).for("update").limit(1);
 
     // Every tap is logged, but a button moves the score only once per lead: re-tapping cannot inflate it.
-    const [scored] = await tx
-      .select({ id: activities.id })
-      .from(activities)
-      .where(and(eq(activities.leadId, lead.id), eq(activities.type, "quick_reply"), sql`${activities.payload}->>'action' = ${parsed.action}`, sql`${activities.payload}->>'scoreChanged' = 'true'`))
-      .limit(1);
+    // The same helper decides what Accept keeps on top of the AI score, so the two can never disagree.
+    const scored = scoredQuickReplies(await quickReplyPayloads(tx, lead.id)).has(parsed.action);
 
     const reply = QUICK_REPLIES[parsed.action];
     const before = locked!.score ?? SCORE_BASELINE;
