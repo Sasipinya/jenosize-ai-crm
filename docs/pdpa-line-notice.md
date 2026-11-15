@@ -32,5 +32,8 @@ never tick or tap "I agree". `consent_at` therefore means "notice delivered", no
 needs explicit consent (for example for marketing messages), add an opt-in step (a Quick Reply or a form) and a
 separate timestamp. Whether the notice-based approach is enough for a given use is a legal question for the owner.
 
-The notice promises deletion on request in chat. The erase action (`data_erased` activity, `contacts.erased_at`) is
-handled by the Phase 5 privacy work, not by this phase. The `/privacy` page it links to is also Phase 5.
+The notice promises deletion on request in chat. **The erase action is not built:** `contacts.erased_at` and the `data_erased`
+activity type exist, and edits and sends to an erased contact are blocked, but nothing sets them, so deletion is a manual
+process by a staff member. The `/privacy` page the notice links to exists (Thai + English, `src/app/privacy/page.tsx`). It
+states the retention policy (below). The activity log is append-only, so free text in notes stays after a
+contact is anonymised; the page says so. See "Production next steps" in the README.

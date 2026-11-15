@@ -250,3 +250,22 @@ agent ท้วงว่าคำว่า "คำสั่ง" ที่เร�
 - Mock tests prove no tap text reaches the model; they cannot prove how a real model scores. Run `pnpm eval --adapter claude` and check a lead with taps in prod.
 
 **Human review:**
+AI ขึ้น score เองเพราะเห็นการกดปุ่ม → ย้ายการให้คะแนนจากปุ่มไปไว้ในโค้ดทั้งหมด, เพิ่มข้อความเตือนเมื่อลูกค้ากด 'ไม่สนใจ', ตรวจบน production แล้วว่า displayText ไม่เข้ามาเป็นข้อความลูกค้า
+
+## 2026-11-15 — Phase 5: /privacy page, README, architecture, API and monitoring docs
+
+**Prompt summary:** Phase 5 polish and docs in 90 minutes. Plan first, then: public bilingual `/privacy` (excluded from the auth guard, with a test), README (setup, credentials, LINE steps, requirement-to-evidence table, hours, cost, trade-offs, production next steps), `docs/architecture.md` (Mermaid), `docs/api.md` generated from the code, `docs/monitoring.md`. Two commits: page + test, then all docs.
+
+**Produced:**
+- `src/app/privacy/page.tsx`, `/privacy` added to the public prefixes in `src/proxy.ts`, `tests/privacy-page.test.ts` (guard lets `/privacy` through, look-alike paths and private pages still redirect, page renders both languages, no retention period). Also checked with a real `next dev` request: 200 for `/privacy`, 307 to `/login` for `/leads`.
+- README rewritten; `docs/architecture.md`, `docs/api.md` (routes traced by the explorer subagent from the 15 route files, spot-checked), `docs/monitoring.md`; `docs/pdpa-line-notice.md` updated (erase is not built, `/privacy` exists).
+- Requirement table marks as not done: D5 (admin panel, `/api/health`), D2 erase and retention, CI, gitleaks, screenshots. Hours are copied as written in `docs/plan.md`; only one hours line exists in this log.
+
+**Agent self-corrections worth reviewing:**
+- Reviewer FAIL on the first page: it said every outgoing message is approved by a person, but the privacy notice is sent automatically; fixed. Also added that name and message text go to the AI provider, and that the append-only activity log keeps free text after anonymising.
+- `next dev` created an `AGENTS.md` in the repo; I deleted it, it is not part of the change.
+- Owner decisions applied after the first diff: retention policy (LINE data kept while the lead is active, deleted within 30 days of a request, automatic deletion and erase action not implemented), hours (P1 2.1, P2 0.5, P3 2.2, P4 1.3, prod-test fixes 1.4, total 7.5 h excluding Phase 5), `AGENTS.md` in `.gitignore`. Reasons for the cuts come from the plan's cut order.
+
+**Known, not fixed:** `src/server/logger.ts` still has a stale comment ("request logging is wired in Phase 5") although `http.ts` already logs requests. The `/api/health` route is listed as public in the guard but does not exist.
+
+**Human review:**
