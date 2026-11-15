@@ -74,7 +74,7 @@ Every requirement from the brief, with where to find it. "Not done" means it is 
 | R17 | Approved outbound, retry key, backoff, Retry | Done | `line/outbound.ts`, `line/push.ts`, `tests/line-outbound.test.ts` |
 | R18 | Mock LINE + mock LLM | Done | `line/adapter.ts`, `ai-adapters.ts` (both default to mock) |
 | R19 | Fallback + visible badge | Done | `skills/crm-copilot/fallback.ts`, `ai-panel.tsx`, `tests/ai-suggestions.test.ts` |
-| R20 | No secrets in the repo | Partly | `.env*` ignored; `pnpm lint` runs `scripts/check-env-example.ts` on `.env.example`. A real key was once committed to `.env.example` and rotated (see the usage log). No gitleaks run and no history scan |
+| R20 | No secrets in the repo | Partly | `.env*` ignored; `pnpm lint` runs `scripts/check-env-example.ts` on `.env.example`. A real key was once committed to `.env.example` (a69a55e) and has been rotated: it returns 401 on production. A gitleaks scan of the full history (CI job `secrets`, `.gitleaksignore`) finds only that one entry |
 | R21 | README | Done (this file) | Missing: screenshots |
 | R22 | Architecture diagrams | Done | [docs/architecture.md](docs/architecture.md) |
 | R23 | API notes, `.env.example` | Done | [docs/api.md](docs/api.md), `.env.example` |
@@ -88,7 +88,7 @@ Every requirement from the brief, with where to find it. "Not done" means it is 
 | D5 | Demo control panel + `/api/health` | **Partly done: `/api/health` done, admin panel not done** | `GET /api/health` (`src/app/api/health/route.ts`, `src/server/services/health.ts`, `tests/health.test.ts`) reports DB, AI adapter/model/`simulatedDown`, LINE adapter and git version. The switches `simulate_ai_down` and `simulate_line_down` (in `app_settings`) are read by the code and tested, but only the seed or a SQL update can change them: no admin page, no API to flip them |
 | D6 | LINE Quick Reply | Done | `line/notice.ts`, `line/inbound.ts` (`applyPostback`), `tests/line-webhook.test.ts`, `tests/quick-reply-score.test.ts` |
 
-CI: `.github/workflows/ci.yml` runs install (frozen lockfile), lint, typecheck, test and the mock eval on every push and pull request, with no secrets. It has not been run on GitHub yet: check the first run (the badge above shows the status once the repo is on GitHub).
+CI: `.github/workflows/ci.yml` runs install (frozen lockfile), lint, typecheck, test and the mock eval on every push and pull request, plus a `secrets` job that runs the gitleaks CLI over the full git history (MIT, no license key; `.gitleaksignore` holds the one known, rotated finding). No repository secrets are needed. It has not been run on GitHub yet: check the first run (the badge above shows the status once the repo is on GitHub).
 
 ## AI design
 
@@ -120,6 +120,7 @@ The AI-specific ones are kept in one place, [skills/crm-copilot/SKILL.md](skills
 - Two simultaneous first messages from a contact whose leads are all closed can create two leads; an event whose processing is killed midway keeps `processed_at` and `error` both empty ([usage log](docs/ai-usage-log.md), Phase 4).
 - Messages from an erased contact are still stored.
 - Responsive layout was checked by hand, not by tests.
+- An old, rotated LEAD_INTAKE_API_KEY remains in git history (a69a55e); it no longer works.
 
 ## AI cost per suggestion (estimate)
 
@@ -152,7 +153,7 @@ Planning and research time (reading docs, account setup, designing the plan) is 
 | Admin "erase customer data" button (D2) | In the plan's own cut order ([docs/plan.md](docs/plan.md), "ความเสี่ยงและสิ่งที่ตัดได้"): "write it as a next step instead". Deletion is manual for now |
 | Demo control panel (D5; `/api/health` was built) | Also in the plan's cut order ("use env toggles instead"); the switches work at the database level |
 | AI quality metrics page, few-shot admin UI, devcontainer | Listed in the plan as "if time allows"; not built |
-| Screenshots in README, gitleaks run | Not done in this phase |
+| Screenshots in README | Not done in this phase |
 
 These reasons come from the plan's pre-agreed cut order and the Phase 5 timebox; the owner should confirm or correct them.
 
@@ -161,7 +162,7 @@ These reasons come from the plan's pre-agreed cut order and the Phase 5 timebox;
 1. **PDPA (not implemented: the erase action and automatic deletion):** build the erase action (anonymise the contact, keep the audit trail, write `data_erased`); implement automatic deletion for the retention policy (LINE data kept while the lead is active, deleted within 30 days of a request) and reset the demo data after the review period; stop storing messages from erased contacts; add an explicit opt-in step if marketing messages are planned; have counsel review the notice and `/privacy`.
 2. **Access control:** per-record ownership and role checks beyond "admin reopens closed leads"; a real identity provider (SSO) instead of the shared demo password; rate limit sign-in.
 3. **Reliability:** an uptime check on `/api/health`; ship logs to a log drain and wire the alerts in [docs/monitoring.md](docs/monitoring.md); a shared rate limiter (the in-memory one is per instance); a recovery job for LINE events whose processing was killed midway.
-4. **CI and security:** add the real-model eval as a manual or nightly job; `gitleaks` on the history; dependency audit; rotate the LINE and Anthropic keys on a schedule.
+4. **CI and security:** add the real-model eval as a manual or nightly job; fail the `secrets` job on any new gitleaks finding (it already scans the full history); dependency audit; rotate the LINE and Anthropic keys on a schedule.
 5. **AI quality:** run the real-model eval before each prompt change and keep the report; replace regex checks on free text with a structured `flags` field in the output (for example a prompt-injection flag); give the model a code-computed "customer declined" signal so it does not propose a follow-up after ไม่สนใจ; measure real cost per suggestion with production-size context.
 6. **LINE:** re-verify payload shapes and Retry-Key behaviour against the Messaging API reference; handle multi-instance webhook races on real Postgres and load-test concurrency (pglite cannot).
 7. **Product:** admin page for the demo switches and few-shot switch, AI-quality metrics (acceptance/edit rate per prompt version), automated responsive checks at 375 px.

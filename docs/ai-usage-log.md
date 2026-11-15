@@ -287,3 +287,20 @@ AI ขึ้น score เองเพราะเห็นการกดปุ�
 - The workflow was not run on GitHub: only the same commands were run locally (Node 26, not 22).
 
 **Human review:**
+reviewer พบว่า line.configured เป็น ok ทั้งที่ไม่มี channel secret จึงแก้ให้เช็กทั้งสองค่า, เพิ่ม connection timeout, CI ผ่านรอบแรกบน GitHub
+
+## 2026-11-15 — Full-history secret scan, README limitation, gitleaks in CI
+
+**Prompt summary:** Scan the full git history for secrets and report commit, file and rotation status, without rewriting history. Then: add a README limitation line, and add a gitleaks CI step only if it needs no license or secret for a personal repo.
+
+**Produced:**
+- Own regex scan of all added lines on all refs (no scanner installed), later confirmed with the gitleaks CLI v8.30.1 (`go install`, run locally): one finding, `LEAD_INTAKE_API_KEY` in `a69a55e` `.env.example`, removed in `d1d4587`, on the remote. The owner confirmed it returns 401 on production, so it is rotated. Everything else was placeholders or fake test fixtures.
+- `.gitleaksignore` (that one fingerprint), a `secrets` job in `.github/workflows/ci.yml` (gitleaks CLI v8.30.1 over full history), README limitation line and evidence-row updates.
+
+**Agent self-corrections worth reviewing:**
+- While inspecting `.env.example` in `a69a55e` my masking command failed on a trailing `=` and printed the old key into the session output. It was already flagged for rotation and the owner confirmed the rotation.
+- I used the gitleaks CLI (MIT, no license key) rather than `gitleaks-action`: the action's own README says a license key is needed only for organization accounts, but it is not MIT-licensed since v2, v3 needs `actions/checkout@v6`, and I could not test it here.
+
+**Known, not fixed:** the CI job itself has not run on GitHub (only the same command locally, Go 1.27, Windows). History is not rewritten, so the old key stays in git history and on the remote.
+
+**Human review:**
