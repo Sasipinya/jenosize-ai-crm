@@ -38,7 +38,7 @@ const ACTION_LABEL: Record<string, string> = {
   close_lost: "Close as lost",
 };
 
-export function AiPanel({ leadId, suggestion }: { leadId: string; suggestion: PanelSuggestion | null }) {
+export function AiPanel({ leadId, suggestion, tapNote = null }: { leadId: string; suggestion: PanelSuggestion | null; tapNote?: string | null }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -89,6 +89,11 @@ export function AiPanel({ leadId, suggestion }: { leadId: string; suggestion: Pa
         )}
       </div>
 
+      {tapNote && (
+        <p role="note" className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900">
+          {tapNote}
+        </p>
+      )}
       {notice && <p className="text-sm text-muted-foreground">{notice}</p>}
       {error && (
         <p role="alert" className="text-sm text-destructive">

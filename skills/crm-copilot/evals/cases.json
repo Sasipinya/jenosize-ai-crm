@@ -249,7 +249,7 @@
   },
   {
     "id": 16,
-    "title": "Quick-reply taps reach the model as customer_action events; the summary is Thai and neutral (customer writes ค่ะ)",
+    "title": "Quick-reply taps never reach the model (code owns their score); the summary is Thai and neutral (customer writes ค่ะ)",
     "manual": false,
     "input": {
       "lead": { "title": "LINE chat: SSPY", "stage": "qualified", "source": "line", "valueThb": 0, "daysInStage": 2 },
@@ -262,8 +262,7 @@
       ]
     },
     "checks": [
-      { "type": "promptMatch", "pattern": "customer_action" },
-      { "type": "promptMatch", "pattern": "นัดคุย" },
+      { "type": "promptNotMatch", "pattern": "customer_action|นัดคุย|book_call|tapped" },
       { "type": "summaryMatch", "pattern": "ลูกค้า" }
     ]
   }

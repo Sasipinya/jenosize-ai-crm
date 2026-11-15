@@ -398,15 +398,36 @@ describe("accept keeps the customer's quick-reply points", () => {
     expect(await scoreOf(lead.id)).toBe(50);
   });
 
-  it("a quick-reply tap reaches the model and invalidates the cached suggestion", async () => {
+  it("a not_interested tap makes Refresh regenerate instead of serving the cache; a book_call tap does not", async () => {
+    const lead = await newLead("Declined");
+    const adapter = createMockAdapter();
+    await suggestForLead(t.db, actor, lead.id, { adapter });
+    await sleep(5);
+    await tap(lead.id, "book_call");
+    expect((await suggestForLead(t.db, actor, lead.id, { adapter })).cached).toBe(true);
+    await sleep(5);
+    await tap(lead.id, "not_interested");
+    const after = await suggestForLead(t.db, actor, lead.id, { adapter });
+    expect(after.cached).toBe(false);
+    expect(adapter.calls).toHaveLength(2);
+    expect(adapter.calls[1]!.user).not.toMatch(/ไม่สนใจ|not_interested|tapped/i); // regenerated, still without the tap
+    await sleep(5);
+    await tap(lead.id, "not_interested", false); // repeat tap: nothing new, served from cache
+    expect((await suggestForLead(t.db, actor, lead.id, { adapter })).cached).toBe(true);
+  });
+
+  it("a quick-reply tap does not reach the model and does not invalidate the cached suggestion", async () => {
     const { lead } = await pending("Boost context");
     await sleep(5);
     await tap(lead.id, "book_call");
     const adapter = createMockAdapter();
     const r = await suggestForLead(t.db, actor, lead.id, { adapter });
-    expect(r.cached).toBe(false);
-    expect(adapter.calls[0]!.user).toContain("customer_action");
-    expect(adapter.calls[0]!.user).toContain("นัดคุย");
+    expect(r.cached).toBe(true); // nothing the model sees has changed
+    expect(adapter.calls).toHaveLength(0);
+    await addNote(t.db, actor, lead.id, { type: "note", text: "Customer called back" }); // a real change regenerates, and the prompt still has no tap
+    await suggestForLead(t.db, actor, lead.id, { adapter });
+    expect(adapter.calls).toHaveLength(1);
+    expect(adapter.calls[0]!.user).not.toMatch(/นัดคุย|book_call|customer_action|tapped/i);
   });
 });
 
@@ -446,6 +467,46 @@ describe("boost: a repeated tap is not counted again", () => {
     await logged(low.id, "not_interested", true);
     await decided(s2.suggestion.id, { action: "accept" });
     expect(await scoreOf(low.id)).toBe(0); // 10 - 20 clamped
+  });
+
+  it("double count: a model that raises its score because of taps cannot, since it never sees them; final = AI base + 25 once", async () => {
+    // A model that is swayed by taps whenever the words appear in what it is given (what prod showed: 35 → 45).
+    const swayed: LlmAdapter = {
+      name: "mock",
+      model: "mock",
+      async generate(req) {
+        const sees = /นัดคุย|ขอใบเสนอราคา|book_call|request_quote|customer_action/.test(req.user);
+        const out = { ...ruleBasedSuggestion(req.context), score: sees ? 45 : 35, scoreReasons: ["ลูกค้ากดปุ่มนัดคุยและขอใบเสนอราคา ซึ่งเป็นสัญญาณความสนใจสูง"] };
+        return { text: JSON.stringify(out), usage: ZERO_USAGE };
+      },
+    };
+    const lead = await newLead("Swayed model");
+    await logged(lead.id, "book_call", true);
+    await logged(lead.id, "request_quote", true);
+    await logged(lead.id, "book_call", false);
+    const { suggestion } = await suggestForLead(t.db, actor, lead.id, { adapter: swayed });
+    expect(suggestionOutputSchema.parse(suggestion.originalOutput).score).toBe(35); // the model never saw a tap
+    await decided(suggestion.id, { action: "accept" });
+    expect(await scoreOf(lead.id)).toBe(60); // 35 + 25 once, not 45 + 25
+  });
+
+  it("even if the model's own reasons mention taps, the saved score is its base score plus the 25 exactly once", async () => {
+    const lead = await newLead("Reasons mention taps");
+    const adapter: LlmAdapter = {
+      name: "mock",
+      model: "mock",
+      async generate(req) {
+        const out = { ...ruleBasedSuggestion(req.context), score: 35, scoreReasons: ["ลูกค้ากดปุ่มนัดคุยและขอใบเสนอราคา ซึ่งเป็นสัญญาณความสนใจสูง"] };
+        return { text: JSON.stringify(out), usage: ZERO_USAGE };
+      },
+    };
+    await logged(lead.id, "book_call", true);
+    await logged(lead.id, "request_quote", true);
+    const { suggestion } = await suggestForLead(t.db, actor, lead.id, { adapter });
+    await decided(suggestion.id, { action: "accept" });
+    expect(await scoreOf(lead.id)).toBe(60);
+    const [act] = await t.db.select().from(activities).where(and(eq(activities.leadId, lead.id), eq(activities.type, "ai_accepted")));
+    expect(act!.payload).toMatchObject({ score: 60, aiScore: 35, boostTotal: 25 });
   });
 
   it("a cached suggestion made with an older prompt version is not served: Refresh calls the model again", async () => {

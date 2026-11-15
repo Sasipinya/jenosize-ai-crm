@@ -10,6 +10,7 @@ import { LineComposer } from "@/components/line-composer";
 import { RetryButton } from "@/components/retry-button";
 import { NoteForm } from "@/components/note-form";
 import { acceptedDraftFor } from "@/lib/line-draft";
+import { tapNotice } from "@/lib/tap-notice";
 import { describeTimelineItem } from "@/lib/timeline";
 import { PageHeader } from "@/components/page-header";
 import { StageSelect } from "@/components/stage-select";
@@ -135,7 +136,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
             <CardTitle className="text-base">AI copilot</CardTitle>
           </CardHeader>
           <CardContent>
-            <AiPanel key={panelSuggestion?.id ?? "none"} leadId={lead.id} suggestion={panelSuggestion} />
+            <AiPanel key={panelSuggestion?.id ?? "none"} leadId={lead.id} suggestion={panelSuggestion} tapNote={tapNotice(timeline)} />
           </CardContent>
         </Card>
         <Card>

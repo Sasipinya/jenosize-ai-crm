@@ -230,3 +230,23 @@ agent ท้วงว่าคำว่า "คำสั่ง" ที่เร�
 
 **Human review:**
 เราเข้าใจผิดว่า 25 เป็นบั๊ก (คิดว่าควรเป็น 15) agent แก้ตามสมมติฐานนั้นก่อน แล้ว replay ลำดับจริงผ่าน webhook handler พบว่าได้ 25 reviewer ให้ FAIL กับเวอร์ชันนั้น เราจึงกลับไปดู Timeline และพบสาเหตุจริง: Accept ตอน 21:51 รีเซ็ต score เป็น 35 (บั๊ก score ทับที่แก้แล้ว) ตัดสินใจใช้ค่าคงที่ในตาราง แต่ละปุ่มนับครั้งเดียว และจำกัด 0–100
+
+## 2026-11-15 — Double count: the model no longer sees quick-reply taps
+
+**Prompt summary:** Prod check after b7abff5: summary Thai and neutral, but the model raised its own score 35 → 45 because of the taps ("กดปุ่มนัดคุยและขอใบเสนอราคา ซึ่งเป็นสัญญาณความสนใจสูง"), then code added +25 → 70. Prompt rule 12 ("do not add points for taps") was not enough. Make it deterministic with one model call; explain the pick in 3 lines first.
+
+**Produced:**
+- Pick: with one call, any tap the model can see can leak into its score, so taps are removed from the model's input. Code owns all tap scoring (the shared helper, added on Accept).
+- Removed the `customer_action` events from the context and prompt rule 12; PROMPT_VERSION v5 (cached v4 suggestions regenerate). A tap no longer invalidates the cached suggestion, since the model does not see it.
+- Added later in the same task: the ไม่สนใจ cache bypass and panel note below (`latestEventAt`, `src/lib/tap-notice.ts`, an `AiPanel` prop), with tests for the cache clock, the service (not_interested bypasses the cache, book_call and a repeat do not) and the note (newest tap wins, a later tap clears it).
+- Tests: the prompt/context hold no trace of a tap; a "swayed" model (raises its score whenever tap words appear in its input) now stays at 35 and Accept gives 35 + 25 = 60, not 45 + 25; a mock whose scoreReasons mention the taps still ends at base + 25 once; eval case 16 now asserts the prompt has no trace of the tap. SKILL.md: v5 history and a Known limitation.
+
+**Known, not fixed:**
+- Cost of the pick: the summary, next action and draft cannot mention a tap (for example the draft cannot say "thanks for choosing book a call"). The owner sees taps in the timeline and in the Accept label. Mentioning them needs a second model call, or a structured field the model fills without a score; not built.
+- ไม่สนใจ (-20) is invisible to the model, so it is covered in code: a ไม่สนใจ tap that changed the score makes Refresh call the model again instead of serving the cached suggestion (the old suggestion stays on screen until Refresh is pressed; nothing is cleared), and the AI panel shows "ลูกค้ากด 'ไม่สนใจ' — ตรวจสอบก่อนส่งข้อความ" while it is the latest tap (no model call). Remaining gap: the regenerated suggestion has the same input, so it can still propose a follow-up and a budget question after a decline; the note protects the owner, the AI does not adapt. A salesperson note that mentions a tap can still be scored by the model and then get the tap points on top.
+- Verified on prod (owner): LINE `displayText` does NOT arrive as an inbound message. A tap logged only a "Quick reply" activity, no "Message received" with the button label, so the label never reaches the model.
+- `docs/eval-report.md` still shows the old case 16 title and results until the next eval run regenerates it.
+- A customer who also types the same intent ("อยากนัดคุยค่ะ") is a normal message the model sees and may score; it is a different signal from the button and is not removed.
+- Mock tests prove no tap text reaches the model; they cannot prove how a real model scores. Run `pnpm eval --adapter claude` and check a lead with taps in prod.
+
+**Human review:**

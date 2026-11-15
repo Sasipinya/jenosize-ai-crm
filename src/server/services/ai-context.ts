@@ -2,7 +2,6 @@
 // messages, keeps the 20 newest events, and works out the facts the prompt needs.
 import { MAX_FIELD_CHARS, redactPii } from "../../../skills/crm-copilot/redact";
 import type { AiContext, AiEvent } from "../../../skills/crm-copilot/schema";
-import { QUICK_REPLIES, type QuickReplyAction } from "./line/notice";
 import type { TimelineItem } from "./leads";
 
 export const MAX_EVENTS = 20;
@@ -35,7 +34,11 @@ export type BuildInput = {
 
 type Row = { at: Date; ev: AiEvent; inbound: boolean; outbound: boolean; contact: boolean };
 
-/** Maps timeline rows to events. System noise (lead created/updated, AI/consent audit rows) is dropped. */
+/**
+ * Maps timeline rows to events. System noise (lead created/updated, AI/consent audit rows) is dropped. Quick-reply taps
+ * are dropped too, on purpose: code owns their score (see quick-reply-score.ts). A model that cannot see a tap cannot
+ * score it, so the points are never counted twice.
+ */
 function toRows(timeline: TimelineItem[], now: Date): Row[] {
   const rows: Row[] = [];
   for (const item of timeline) {
@@ -61,13 +64,6 @@ function toRows(timeline: TimelineItem[], now: Date): Row[] {
       rows.push({ at: item.at, ev: { kind: "note", daysAgo, text: sanitize(text) }, inbound: false, outbound: false, contact: true });
     } else if (item.type === "call") {
       rows.push({ at: item.at, ev: { kind: "call", daysAgo, text: sanitize(text) }, inbound: false, outbound: true, contact: true });
-    } else if (item.type === "quick_reply") {
-      // A button tap is a customer signal. The text is built from OUR fixed label, never from customer free text.
-      // Repeat taps (score unchanged) add nothing, so they are skipped.
-      const action = typeof p.action === "string" && p.action in QUICK_REPLIES ? (p.action as QuickReplyAction) : null;
-      if (action && p.scoreChanged === true) {
-        rows.push({ at: item.at, ev: { kind: "customer_action", daysAgo, text: `Customer tapped the quick-reply button "${QUICK_REPLIES[action].label}" (${action})` }, inbound: false, outbound: false, contact: false });
-      }
     } else if (item.type === "stage_change") {
       const reason = typeof p.lostReason === "string" ? ` (reason: ${sanitize(p.lostReason)})` : "";
       rows.push({ at: item.at, ev: { kind: "stage_change", daysAgo, text: `${String(p.from)} → ${String(p.to)}${reason}` }, inbound: false, outbound: false, contact: false });
@@ -76,11 +72,16 @@ function toRows(timeline: TimelineItem[], now: Date): Row[] {
   return rows.sort((a, b) => a.at.getTime() - b.at.getTime());
 }
 
-/** Newest real activity/message time. Ignores ai_accepted so accepting a suggestion does not invalidate the cache. */
+/**
+ * Newest real activity/message time. Ignores ai_accepted, and quick_reply taps (the model never sees them), so those do
+ * not invalidate the cache. One exception: a "not interested" tap that changed the score does, so Refresh calls the
+ * model again instead of serving the suggestion made before the decline (the old one stays on screen until Refresh).
+ */
 export function latestEventAt(timeline: TimelineItem[]): Date | null {
   let max: Date | null = null;
   for (const item of timeline) {
     if (item.kind === "activity" && item.type === "ai_accepted") continue;
+    if (item.kind === "activity" && item.type === "quick_reply" && !(item.payload.action === "not_interested" && item.payload.scoreChanged === true)) continue;
     if (!max || item.at > max) max = item.at;
   }
   return max;
