@@ -3,7 +3,7 @@
 import { getToken } from "next-auth/jwt";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PUBLIC_PREFIXES = ["/login", "/contact-us", "/api/auth", "/api/public", "/api/webhooks", "/api/health"];
+const PUBLIC_PREFIXES = ["/login", "/contact-us", "/privacy", "/api/auth", "/api/public", "/api/webhooks", "/api/health"];
 
 const isPublic = (path: string) => PUBLIC_PREFIXES.some((p) => path === p || path.startsWith(`${p}/`));
 
