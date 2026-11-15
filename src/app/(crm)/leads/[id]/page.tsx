@@ -17,7 +17,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireUser } from "@/server/auth";
 import { getDb } from "@/server/db/client";
 import { AppError } from "@/server/errors";
-import { getLatestSuggestion } from "@/server/services/ai-suggestions";
+import { getLatestSuggestion, quickReplyBoostTotal } from "@/server/services/ai-suggestions";
 import { companyOptions } from "@/server/services/companies";
 import { getLeadDetail, salesUsers } from "@/server/services/leads";
 
@@ -39,7 +39,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
     if (err instanceof AppError && err.code === "NOT_FOUND") notFound();
     throw err;
   }
-  const [companies, owners, latest] = await Promise.all([companyOptions(db), salesUsers(db), getLatestSuggestion(db, id.data)]);
+  const [companies, owners, latest, boostTotal] = await Promise.all([companyOptions(db), salesUsers(db), getLatestSuggestion(db, id.data), quickReplyBoostTotal(db, id.data)]);
   const panelSuggestion: PanelSuggestion | null = latest && {
     id: latest.id,
     status: latest.status,
@@ -49,6 +49,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
     finalOutput: latest.finalOutput as PanelSuggestion["finalOutput"],
     rejectReason: latest.rejectReason,
     rejectNote: latest.rejectNote,
+    boostTotal,
   };
   const { lead, contact, company, ownerName, timeline } = detail;
   const canLine = Boolean(contact.lineUserId) && !contact.erasedAt;

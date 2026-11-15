@@ -182,7 +182,7 @@
       { "type": "source", "value": "llm" },
       { "type": "draftNotNull" },
       { "type": "draftNotMatch", "pattern": "50|discount|9,999|ส่วนลด|baht" },
-      { "type": "reasonMatch", "pattern": "Draft replaced" }
+      { "type": "reasonMatch", "pattern": "แทนที่ร่างข้อความ" }
     ]
   },
   {
@@ -210,5 +210,61 @@
     "coveredBy": "tests/ai-suggestions.test.ts",
     "input": null,
     "checks": []
+    },
+  {
+    "id": 14,
+    "title": "Language drift: summary/reasons/next action come back in English; code rejects it, retries once, then the Thai fallback is used (mock model, deterministic)",
+    "manual": false,
+    "forceMode": "english_drift",
+    "input": {
+      "lead": { "title": "LINE chat: SSPY", "stage": "qualified", "source": "line", "valueThb": 0, "daysInStage": 1 },
+      "contact": { "fullName": "SSPY" },
+      "company": null,
+      "politeParticle": "ค่ะ",
+      "events": [{ "daysAgo": 0, "kind": "in", "text": "สนใจบริการค่ะ ขอรายละเอียดหน่อยค่ะ" }]
+    },
+    "checks": [
+      { "type": "source", "value": "fallback" },
+      { "type": "summaryMatch", "pattern": "[ก-ฺ]" },
+      { "type": "outputNotMatch", "pattern": "interested|waiting for a reply|Reply today" }
+    ]
+  },
+  {
+    "id": 15,
+    "title": "Gendered wording: the model guesses the customer's gender from ค่ะ (she / เธอ / ผู้หญิง); code rejects it and the neutral Thai fallback is used (mock model, deterministic)",
+    "manual": false,
+    "forceMode": "gendered",
+    "input": {
+      "lead": { "title": "LINE chat: SSPY", "stage": "qualified", "source": "line", "valueThb": 0, "daysInStage": 1 },
+      "contact": { "fullName": "SSPY" },
+      "company": null,
+      "politeParticle": "ค่ะ",
+      "events": [{ "daysAgo": 0, "kind": "in", "text": "สนใจบริการค่ะ ขอรายละเอียดหน่อยค่ะ" }]
+    },
+    "checks": [
+      { "type": "source", "value": "fallback" },
+      { "type": "summaryMatch", "pattern": "ลูกค้า" },
+      { "type": "outputNotMatch", "pattern": "เธอ|ผู้หญิง|\bshe\b" }
+    ]
+  },
+  {
+    "id": 16,
+    "title": "Quick-reply taps reach the model as customer_action events; the summary is Thai and neutral (customer writes ค่ะ)",
+    "manual": false,
+    "input": {
+      "lead": { "title": "LINE chat: SSPY", "stage": "qualified", "source": "line", "valueThb": 0, "daysInStage": 2 },
+      "contact": { "fullName": "SSPY" },
+      "company": null,
+      "politeParticle": "ค่ะ",
+      "events": [
+        { "daysAgo": 1, "kind": "in", "text": "สนใจบริการค่ะ" },
+        { "daysAgo": 0, "kind": "quick", "text": "book_call" }
+      ]
+    },
+    "checks": [
+      { "type": "promptMatch", "pattern": "customer_action" },
+      { "type": "promptMatch", "pattern": "นัดคุย" },
+      { "type": "summaryMatch", "pattern": "ลูกค้า" }
+    ]
   }
 ]

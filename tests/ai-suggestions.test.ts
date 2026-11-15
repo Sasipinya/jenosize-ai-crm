@@ -1,7 +1,8 @@
 // AI suggestion service: pending-only output, per-lead cache, fallback, and the decide-once guard.
 import { and, count, eq, ne } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createMockAdapter } from "@/server/services/ai-adapters";
+import { createMockAdapter, ZERO_USAGE, type LlmAdapter } from "@/server/services/ai-adapters";
+import { ruleBasedSuggestion } from "../skills/crm-copilot/fallback";
 import { aiSuggestions, activities, appSettings, contacts, leads, users } from "@/server/db/schema";
 import { seedDatabase, DEMO_SALES_EMAIL } from "@/server/db/seed";
 import { addNote, changeStage, createLead, type Actor } from "@/server/services/leads";
@@ -294,5 +295,116 @@ describe("decideSuggestion", () => {
     const [l] = await t.db.select().from(leads).where(eq(leads.id, lead.id));
     expect(l!.score).toBeNull();
     expect(await countActivities(lead.id, "ai_accepted")).toBe(0);
+  });
+});
+
+describe("accept keeps the customer's quick-reply points", () => {
+  const withScore = (score: number): LlmAdapter => ({
+    name: "mock",
+    model: "mock",
+    async generate(req) {
+      return { text: JSON.stringify({ ...ruleBasedSuggestion(req.context), score }), usage: ZERO_USAGE };
+    },
+  });
+  async function pending(title: string, score?: number) {
+    const lead = await newLead(title);
+    const { suggestion } = await suggestForLead(t.db, actor, lead.id, { adapter: score === undefined ? createMockAdapter() : withScore(score) });
+    return { lead, suggestion, ai: suggestionOutputSchema.parse(suggestion.originalOutput).score };
+  }
+  const tap = (leadId: string, action: string, scoreChanged = true) =>
+    t.db.insert(activities).values({ leadId, actorId: null, type: "quick_reply", payload: { action, scoreChanged, text: "tap" } });
+  const scoreOf = async (leadId: string) => (await t.db.select().from(leads).where(eq(leads.id, leadId)))[0]!.score;
+
+  it("accept = AI score + boosts, and the activity records the split (the prod case: 35 + 15 = 50)", async () => {
+    const { lead, suggestion } = await pending("Boost accept", 35);
+    await t.db.update(leads).set({ score: 50 }).where(eq(leads.id, lead.id)); // 35 from an earlier accept + 15 from a tap
+    await tap(lead.id, "request_quote");
+    const row = await decided(suggestion.id, { action: "accept" });
+    expect(await scoreOf(lead.id)).toBe(50);
+    expect((row.finalOutput as { score: number }).score).toBe(50);
+    expect((row.originalOutput as { score: number }).score).toBe(35); // the AI's own number is kept
+    const [act] = await t.db.select().from(activities).where(and(eq(activities.leadId, lead.id), eq(activities.type, "ai_accepted")));
+    expect(act!.payload).toMatchObject({ score: 50, aiScore: 35, boostTotal: 15 });
+  });
+
+  it("adds several buttons, subtracts not_interested, and counts each button once", async () => {
+    const { lead, suggestion, ai } = await pending("Boost sum");
+    await tap(lead.id, "book_call"); // +10
+    await tap(lead.id, "request_quote"); // +15
+    await tap(lead.id, "not_interested"); // -20
+    await tap(lead.id, "book_call"); // same button again: still counted once
+    await decided(suggestion.id, { action: "accept" });
+    expect(await scoreOf(lead.id)).toBe(Math.max(0, Math.min(100, ai + 5)));
+  });
+
+  it("repeat taps that did not change the score are ignored", async () => {
+    const { lead, suggestion, ai } = await pending("Boost repeat");
+    await tap(lead.id, "book_call", false);
+    await decided(suggestion.id, { action: "accept" });
+    expect(await scoreOf(lead.id)).toBe(ai);
+  });
+
+  it("never double counts: accepting a second suggestion later gives AI + the same boosts, not the boosts twice", async () => {
+    const { lead, suggestion } = await pending("Boost twice", 35);
+    await tap(lead.id, "request_quote");
+    await decided(suggestion.id, { action: "accept" });
+    expect(await scoreOf(lead.id)).toBe(50);
+    await addNote(t.db, actor, lead.id, { type: "note", text: "new activity so the cache is bypassed" });
+    const next = await suggestForLead(t.db, actor, lead.id, { adapter: withScore(40) });
+    expect(next.cached).toBe(false);
+    await decided(next.suggestion.id, { action: "accept" });
+    expect(await scoreOf(lead.id)).toBe(55); // 40 + 15, not 40 + 15 + 15
+  });
+
+  it("the result is clamped to 100", async () => {
+    const { lead, suggestion } = await pending("Boost clamp", 95);
+    await tap(lead.id, "book_call");
+    await tap(lead.id, "request_quote");
+    await decided(suggestion.id, { action: "accept" });
+    expect(await scoreOf(lead.id)).toBe(100);
+  });
+
+  it("a lead with no quick replies gets the plain AI score", async () => {
+    const { lead, suggestion } = await pending("Boost none", 35);
+    const row = await decided(suggestion.id, { action: "accept" });
+    expect(await scoreOf(lead.id)).toBe(35);
+    expect((row.finalOutput as { score: number }).score).toBe(35);
+  });
+
+  it("edit: a score the human typed is saved as-is, with no boost", async () => {
+    const { lead, suggestion } = await pending("Boost edit typed", 35);
+    await tap(lead.id, "request_quote");
+    const original = suggestionOutputSchema.parse(suggestion.originalOutput);
+    await decided(suggestion.id, { action: "edit", finalOutput: { ...original, score: 70 } });
+    expect(await scoreOf(lead.id)).toBe(70);
+    const [act] = await t.db.select().from(activities).where(and(eq(activities.leadId, lead.id), eq(activities.type, "ai_accepted")));
+    expect(act!.payload).toMatchObject({ score: 70, aiScore: 35, boostTotal: 0 });
+  });
+
+  it("edit: changing only the draft keeps the boosts", async () => {
+    const { lead, suggestion } = await pending("Boost edit draft", 35);
+    await tap(lead.id, "request_quote");
+    const original = suggestionOutputSchema.parse(suggestion.originalOutput);
+    await decided(suggestion.id, { action: "edit", finalOutput: { ...original, draftReply: "My own wording" } });
+    expect(await scoreOf(lead.id)).toBe(50);
+  });
+
+  it("dismiss still leaves the score alone", async () => {
+    const { lead, suggestion } = await pending("Boost dismiss", 35);
+    await t.db.update(leads).set({ score: 50 }).where(eq(leads.id, lead.id));
+    await tap(lead.id, "request_quote");
+    await decided(suggestion.id, { action: "dismiss" });
+    expect(await scoreOf(lead.id)).toBe(50);
+  });
+
+  it("a quick-reply tap reaches the model and invalidates the cached suggestion", async () => {
+    const { lead } = await pending("Boost context");
+    await sleep(5);
+    await tap(lead.id, "book_call");
+    const adapter = createMockAdapter();
+    const r = await suggestForLead(t.db, actor, lead.id, { adapter });
+    expect(r.cached).toBe(false);
+    expect(adapter.calls[0]!.user).toContain("customer_action");
+    expect(adapter.calls[0]!.user).toContain("นัดคุย");
   });
 });

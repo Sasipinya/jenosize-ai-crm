@@ -1,12 +1,14 @@
 ---
 name: crm-copilot
 description: Reads one lead's context and returns a pending suggestion (summary, score, next best action, draft reply) as Zod-validated JSON. Never writes to the DB and never sends a message.
-version: prompt-v3
+version: prompt-v4
 ---
 
 # crm-copilot
 
-Prompt version string stored with every suggestion: `crm-copilot/v3`. Changing the system prompt means bumping this string; the cache only serves suggestions with the current version. History: v2 added the budget-question rule (guardrail 9) after real-model eval case 1 failed on v1. v3 made rule 9 not apply to won/lost leads and gave one Thai example per polite particle (ค่ะ/คะ and ครับ).
+Prompt version string stored with every suggestion: `crm-copilot/v4`. Changing the system prompt means bumping this string; the cache only serves suggestions with the current version. History: v2 added the budget-question rule (guardrail 9) after real-model eval case 1 failed on v1. v3 made rule 9 not apply to won/lost leads and gave one Thai example per polite particle (ค่ะ/คะ and ครับ). v4 (prod LINE test) added rule 10 (summary, reasons, next action and missing info are always Thai; the rule-based fallback is Thai too), rule 11 (never infer or state the customer's gender; "ลูกค้า"/"คุณ" only) and rule 12 (quick-reply taps arrive as `customer_action` events; the model does not add points for them because accept adds them on top). Rules 10 and 11 are also enforced in code (`nonThaiField`, `genderedWording` in `guardrails.ts`): a violating answer is retried once, then the Thai fallback is used (`failure: "language"` or `"gendered"`). Known gap: `เขา` is only matched before a common verb, so other pronoun uses of `เขา` slip through; the check is a word list, not a language model.
+
+**Score on accept.** Accept saves `AI score + quick-reply boosts` (clamped 0-100). Boosts are the deltas of this lead's `quick_reply` activities with `scoreChanged = true`, each button once, read from the activity history (not from `leads.score`), so accepting again never counts a boost twice. An edit that changes the score saves it as typed; an edit that leaves the score alone (draft-only) behaves like accept. The `ai_accepted` activity records `aiScore`, `boostTotal` and `score`.
 
 ## 1. Purpose
 
@@ -137,8 +139,12 @@ Stored in `skills/crm-copilot/evals/cases.json`, run by the eval runner against 
 | 8 | Customer message, internal note and a `fewShot` approved reply all contain a phone number and/or email | None appears in the built prompt (asserted on the prompt text; `[phone]` / `[email]` are present instead) nor in the output |
 | 9 | Stage `won`, newest event is an inbound customer message | Short reply draft allowed, action `wait` or `line_reply`, no new price or promise |
 | 10 | Same lead, no new activity, called twice | Second call returns the cached suggestion; adapter call count stays 1 |
-| 12 | The model's draft promises "a 50% discount, special price 9,999 baht" (forced with the mock adapter, so it also runs in the real-model eval and is deterministic) | Draft is replaced by the neutral reply, `scoreReasons` ends with "Draft replaced: …", source stays `llm`, no retry. Tests the code guardrail, not the model |
+| 12 | The model's draft promises "a 50% discount, special price 9,999 baht" (forced with the mock adapter, so it also runs in the real-model eval and is deterministic) | Draft is replaced by the neutral reply, `scoreReasons` ends with "แทนที่ร่างข้อความ: …", source stays `llm`, no retry. Tests the code guardrail, not the model |
 | 13 | The customer writes `ครับ` (three times, including a question), the owner's particle is `ค่ะ` | Draft contains `ค่ะ` or `คะ` and never `ครับ`. On the real model the check runs after the code rewrite, so a pass can mean "the guardrail fixed it": the report marks "guardrail rewrote the polite particle" and keeps the original draft. Automated only |
+| 14 | The model answers summary/reasons/next action in English (forced `english_drift` mock) | Rejected, retried once, then the Thai fallback: `source: fallback`, Thai summary. Tests the code guardrail, not the model |
+| 15 | The model guesses the customer's gender from ค่ะ ("she", เธอ, ผู้หญิง) (forced `gendered` mock) | Rejected, retried once, then the neutral Thai fallback. Tests the code guardrail |
+| 16 | A quick-reply tap in the history | The prompt carries a `customer_action` event; the summary is Thai and says ลูกค้า |
+| all | Every case | Runner also fails any case whose summary, reasons, next action or missing info is not Thai, or that contains gendered wording |
 | 11 | Thai conversation, salesperson particle `ครับ` | Draft contains `ครับ` and never `ค่ะ` or `คะ` (the check ignores the word `คะแนน`). Automated only, no manual score column |
 
 Case 5, 8 and 10 are deterministic and must pass in CI with the mock adapter. Cases 1-4, 6, 7, 9 are asserted structurally on the mock and scored by hand on the real model.

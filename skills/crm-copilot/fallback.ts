@@ -9,26 +9,30 @@ const GIVE_UP_DAYS = 45;
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 const firstName = (full: string) => full.trim().split(/\s+/)[0] ?? full;
 
+// The rule-based text is always Thai (summary, reasons, next action, missing info): the same language rule as the model.
+const STAGE_TH = { new: "ใหม่", qualified: "ผ่านการคัดกรอง", proposal: "เสนอราคา", won: "ปิดการขายได้", lost: "ปิดการขายไม่สำเร็จ" } as const;
+const SOURCE_TH = { website: "เว็บไซต์", manual: "บันทึกเอง", line: "LINE" } as const;
+
 const BASE_SCORE = { new: 30, qualified: 50, proposal: 65, won: 100, lost: 0 } as const;
 
 export function scoreFromRules(ctx: AiContext): { score: number; reasons: string[] } {
   const { lead } = ctx;
-  if (lead.stage === "won") return { score: 100, reasons: ["Lead is won"] };
-  if (lead.stage === "lost") return { score: 0, reasons: ["Lead is lost"] };
+  if (lead.stage === "won") return { score: 100, reasons: ["ดีลนี้ปิดการขายได้แล้ว"] };
+  if (lead.stage === "lost") return { score: 0, reasons: ["ดีลนี้ปิดการขายไม่สำเร็จแล้ว"] };
   let score: number = BASE_SCORE[lead.stage];
-  const reasons = [`Stage is ${lead.stage}`];
+  const reasons = [`ขั้นตอนปัจจุบัน: ${STAGE_TH[lead.stage]}`];
   const adjust = (delta: number, reason: string) => {
     score += delta;
     reasons.push(reason);
   };
-  if (lead.valueThb >= 1_000_000) adjust(10, "High deal value");
-  else if (lead.valueThb >= 100_000) adjust(5, "Medium deal value");
+  if (lead.valueThb >= 1_000_000) adjust(10, "มูลค่าดีลสูง");
+  else if (lead.valueThb >= 100_000) adjust(5, "มูลค่าดีลปานกลาง");
   const d = lead.daysSinceLastContact;
-  if (d === null) reasons.push("No contact recorded yet");
-  else if (d > VERY_STALE_DAYS) adjust(-25, `No contact for ${d} days: gone quiet`);
-  else if (d > STALE_DAYS) adjust(-15, `No contact for ${d} days: gone quiet`);
-  else if (d <= 3) adjust(5, "Recent contact");
-  if (lead.hasUnansweredInbound) adjust(10, "Customer is waiting for a reply");
+  if (d === null) reasons.push("ยังไม่มีการติดต่อ");
+  else if (d > VERY_STALE_DAYS) adjust(-25, `ไม่ได้ติดต่อมา ${d} วัน ลูกค้าเงียบไป`);
+  else if (d > STALE_DAYS) adjust(-15, `ไม่ได้ติดต่อมา ${d} วัน ลูกค้าเงียบไป`);
+  else if (d <= 3) adjust(5, "ติดต่อล่าสุดไม่นาน");
+  if (lead.hasUnansweredInbound) adjust(10, "ลูกค้ากำลังรอการตอบกลับ");
   return { score: clamp(score, 0, 100), reasons: reasons.slice(0, 5) };
 }
 
@@ -58,10 +62,10 @@ export function neutralReply(ctx: AiContext): string {
 
 export function missingInfoFromRules(ctx: AiContext): string[] {
   const out: string[] = [];
-  if (ctx.lead.valueThb === 0) out.push("Budget or deal value");
-  if (ctx.events.length === 0) out.push("Conversation history");
-  if (!ctx.company) out.push("Company");
-  if (ctx.lead.daysSinceLastContact === null) out.push("Last contact date");
+  if (ctx.lead.valueThb === 0) out.push("งบประมาณหรือมูลค่าดีล");
+  if (ctx.events.length === 0) out.push("ประวัติการสนทนา");
+  if (!ctx.company) out.push("บริษัท");
+  if (ctx.lead.daysSinceLastContact === null) out.push("วันที่ติดต่อล่าสุด");
   return out.slice(0, 5);
 }
 
@@ -76,37 +80,37 @@ export function ruleBasedSuggestion(ctx: AiContext): SuggestionOutput {
   let dueInDays: number;
   if (terminal && !lead.newestEventIsInbound) {
     type = "wait";
-    detail = `Lead is ${lead.stage}; no action needed.`;
+    detail = `ดีลนี้${STAGE_TH[lead.stage]}แล้ว ไม่ต้องดำเนินการเพิ่ม`;
     dueInDays = 0;
   } else if (lead.hasUnansweredInbound) {
     type = lead.source === "line" ? "line_reply" : "call";
-    detail = "Customer is waiting for a reply. Respond today.";
+    detail = "ลูกค้ากำลังรอการตอบกลับ ควรตอบกลับวันนี้";
     dueInDays = 0;
   } else if (lead.stage === "proposal" && days !== null && days >= GIVE_UP_DAYS) {
     type = "close_lost";
-    detail = `No response for ${days} days after the proposal. Consider closing as lost.`;
+    detail = `ไม่มีการตอบกลับ ${days} วันหลังส่งใบเสนอราคา พิจารณาปิดดีลว่าไม่สำเร็จ`;
     dueInDays = 2;
   } else if (lead.stage === "proposal" && days !== null && days >= STALE_DAYS) {
     type = "call";
-    detail = `Proposal has been quiet for ${days} days. Call to check status.`;
+    detail = `ใบเสนอราคาเงียบมา ${days} วันแล้ว โทรติดตามสถานะ`;
     dueInDays = 1;
   } else if (lead.stage === "qualified" && days !== null && days <= STALE_DAYS) {
     type = "send_proposal";
-    detail = "Lead is qualified. Prepare and send a proposal.";
+    detail = "ลูกค้าผ่านการคัดกรองแล้ว จัดทำและส่งใบเสนอราคา";
     dueInDays = 3;
   } else if (lead.stage === "proposal") {
     type = "wait";
-    detail = "Proposal is out and contact is recent. Wait for the customer.";
+    detail = "ส่งใบเสนอราคาแล้วและติดต่อล่าสุดไม่นาน รอการตอบกลับจากลูกค้า";
     dueInDays = 3;
   } else {
     type = "call";
-    detail = "Reach out to qualify the lead.";
+    detail = "ติดต่อเพื่อคัดกรองลูกค้า";
     dueInDays = 2;
   }
 
   const draftReply = terminal && !lead.newestEventIsInbound ? null : templateReply(ctx, lead.valueThb === 0 && lead.stage !== "proposal");
-  const last = days === null ? "no contact yet" : `last contact ${days} days ago`;
-  const summary = `Rule-based summary: stage ${lead.stage}, source ${lead.source}, value ฿${lead.valueThb.toLocaleString("en-US")}, ${last}, ${ctx.events.length} recent events${lead.hasUnansweredInbound ? ", customer waiting for a reply" : ""}.`;
+  const last = days === null ? "ยังไม่เคยติดต่อ" : `ติดต่อล่าสุด ${days} วันก่อน`;
+  const summary = `สรุปแบบกฎอัตโนมัติ: ขั้นตอน${STAGE_TH[lead.stage]} ช่องทาง ${SOURCE_TH[lead.source]} มูลค่า ฿${lead.valueThb.toLocaleString("en-US")} ${last} มี ${ctx.events.length} เหตุการณ์ล่าสุด${lead.hasUnansweredInbound ? " ลูกค้ากำลังรอการตอบกลับ" : ""}`;
 
   return {
     summary,

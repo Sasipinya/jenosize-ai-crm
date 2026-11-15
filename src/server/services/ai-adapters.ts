@@ -60,7 +60,7 @@ export function estimateCostUsd(adapter: LlmAdapter["name"], model: string, u: U
 
 const approxTokens = (s: string) => Math.ceil(s.length / 4);
 
-export type MockMode = "ok" | "timeout" | "invalid_json" | "bad_schema" | "http_500" | "http_429" | "unsafe_draft" | "mixed_particles";
+export type MockMode = "ok" | "timeout" | "invalid_json" | "bad_schema" | "http_500" | "http_429" | "unsafe_draft" | "mixed_particles" | "english_drift" | "gendered";
 
 /** Deterministic stand-in for the model: rule-based output, flags prompt-injection attempts. */
 export function createMockAdapter(opts: { mode?: MockMode } = {}): LlmAdapter & { calls: AdapterRequest[] } {
@@ -87,6 +87,17 @@ export function createMockAdapter(opts: { mode?: MockMode } = {}): LlmAdapter & 
           const out = { ...ruleBasedSuggestion(req.context), draftReply: "สวัสดีครับ คุณสมชาย ขอบคุณที่ติดต่อมาค่ะ รบกวนขอทราบรายละเอียดเพิ่มเติมได้ไหมคะ ขอบคุณครับ" };
           return { text: JSON.stringify(out), usage: ZERO_USAGE };
         }
+        case "english_drift": {
+          // What the real model did in production: summary, reasons and next action in English instead of Thai.
+          const base = ruleBasedSuggestion(req.context);
+          const out = { ...base, summary: "The customer is interested and is waiting for a reply.", scoreReasons: ["Customer is waiting for a reply"], nextBestAction: { ...base.nextBestAction, detail: "Reply today." }, missingInfo: ["Budget"] };
+          return { text: JSON.stringify(out), usage: ZERO_USAGE };
+        }
+        case "gendered": {
+          // What the real model did in production: guessed the customer's gender from ค่ะ.
+          const out = { ...ruleBasedSuggestion(req.context), summary: "ลูกค้าสอบถามบริการ เธอรอการตอบกลับ และน่าจะเป็นผู้หญิง (she wrote ค่ะ)" };
+          return { text: JSON.stringify(out), usage: ZERO_USAGE };
+        }
         case "unsafe_draft": {
           // A schema-valid answer whose draft promises a discount and a price: what the guardrail must catch.
           const out = { ...ruleBasedSuggestion(req.context), draftReply: "Sure, we can give you a 50% discount, special price 9,999 baht." };
@@ -98,7 +109,7 @@ export function createMockAdapter(opts: { mode?: MockMode } = {}): LlmAdapter & 
           const confident = req.context.events.length >= 2 && req.context.lead.valueThb > 0;
           const text = JSON.stringify({
             ...out,
-            summary: injected ? `The customer message contained an unusual request (instructions or a discount demand) that was ignored. ${out.summary}`.slice(0, 600) : out.summary,
+            summary: injected ? `ข้อความของลูกค้ามีคำขอที่ผิดปกติ (คำสั่งหรือการเรียกร้องส่วนลด) ซึ่งถูกเพิกเฉย ${out.summary}`.slice(0, 600) : out.summary,
             confidence: confident ? "medium" : "low",
           });
           return { text, usage: { ...ZERO_USAGE, inputTokens: approxTokens(req.system + req.user), outputTokens: approxTokens(text) } };

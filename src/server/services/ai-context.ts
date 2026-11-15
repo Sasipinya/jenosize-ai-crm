@@ -2,6 +2,7 @@
 // messages, keeps the 20 newest events, and works out the facts the prompt needs.
 import { MAX_FIELD_CHARS, redactPii } from "../../../skills/crm-copilot/redact";
 import type { AiContext, AiEvent } from "../../../skills/crm-copilot/schema";
+import { QUICK_REPLIES, type QuickReplyAction } from "./line/notice";
 import type { TimelineItem } from "./leads";
 
 export const MAX_EVENTS = 20;
@@ -60,6 +61,13 @@ function toRows(timeline: TimelineItem[], now: Date): Row[] {
       rows.push({ at: item.at, ev: { kind: "note", daysAgo, text: sanitize(text) }, inbound: false, outbound: false, contact: true });
     } else if (item.type === "call") {
       rows.push({ at: item.at, ev: { kind: "call", daysAgo, text: sanitize(text) }, inbound: false, outbound: true, contact: true });
+    } else if (item.type === "quick_reply") {
+      // A button tap is a customer signal. The text is built from OUR fixed label, never from customer free text.
+      // Repeat taps (score unchanged) add nothing, so they are skipped.
+      const action = typeof p.action === "string" && p.action in QUICK_REPLIES ? (p.action as QuickReplyAction) : null;
+      if (action && p.scoreChanged === true) {
+        rows.push({ at: item.at, ev: { kind: "customer_action", daysAgo, text: `Customer tapped the quick-reply button "${QUICK_REPLIES[action].label}" (${action})` }, inbound: false, outbound: false, contact: false });
+      }
     } else if (item.type === "stage_change") {
       const reason = typeof p.lostReason === "string" ? ` (reason: ${sanitize(p.lostReason)})` : "";
       rows.push({ at: item.at, ev: { kind: "stage_change", daysAgo, text: `${String(p.from)} → ${String(p.to)}${reason}` }, inbound: false, outbound: false, contact: false });

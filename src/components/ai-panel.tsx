@@ -19,6 +19,8 @@ export type PanelSuggestion = {
   finalOutput: SuggestionOutput | null;
   rejectReason: string | null;
   rejectNote: string | null;
+  /** Quick-reply points the customer earned; Accept adds them on top of the AI score. */
+  boostTotal: number;
 };
 
 const REJECT_OPTIONS = [
@@ -108,7 +110,7 @@ export function AiPanel({ leadId, suggestion }: { leadId: string; suggestion: Pa
             </span>
             <span>
               <span className="text-muted-foreground">Next </span>
-              {ACTION_LABEL[shown.nextBestAction.type]} · {dueLabel(shown.nextBestAction.dueInDays, isThaiText(shown.draftReply, shown.summary))}
+              {ACTION_LABEL[shown.nextBestAction.type]} · {dueLabel(shown.nextBestAction.dueInDays, isThaiText(shown.draftReply))}
             </span>
           </div>
           <ul className="list-disc space-y-0.5 pl-5">
@@ -145,7 +147,9 @@ export function AiPanel({ leadId, suggestion }: { leadId: string; suggestion: Pa
                   </Button>
                 ) : (
                   <Button size="sm" disabled={busy} onClick={() => decide({ action: "accept" }, "Accepted.")}>
-                    Accept
+                    {suggestion.boostTotal !== 0
+                      ? `Accept: AI ${suggestion.output.score} ${suggestion.boostTotal > 0 ? "+" : "−"} quick replies ${Math.abs(suggestion.boostTotal)} = ${Math.max(0, Math.min(100, suggestion.output.score + suggestion.boostTotal))}`
+                      : "Accept"}
                   </Button>
                 )}
               </div>

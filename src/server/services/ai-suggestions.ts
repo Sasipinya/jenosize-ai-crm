@@ -7,7 +7,7 @@ import { PROMPT_VERSION } from "../../../skills/crm-copilot/prompt";
 import { suggestionOutputSchema, type SuggestionOutput } from "../../../skills/crm-copilot/schema";
 import type { AiDecisionInput } from "@/lib/validation/ai";
 import type { Db } from "../db/client";
-import { aiSuggestions, appSettings, leads, users } from "../db/schema";
+import { activities, aiSuggestions, appSettings, leads, users } from "../db/schema";
 import { AppError } from "../errors";
 import { logger } from "../logger";
 import { addActivity } from "./activities";
@@ -15,6 +15,7 @@ import { adapterFromEnv, type LlmAdapter } from "./ai-adapters";
 import { buildContext, latestEventAt } from "./ai-context";
 import { generateSuggestion } from "./ai-generate";
 import { getLeadDetail, type Actor } from "./leads";
+import { QUICK_REPLIES, type QuickReplyAction } from "./line/notice";
 
 export type SuggestionRow = typeof aiSuggestions.$inferSelect;
 
@@ -143,7 +144,30 @@ export async function suggestForLead(
   return { suggestion: suggestion!, cached: false };
 }
 
-/** Accept / edit / dismiss a pending suggestion. One transaction; a decided suggestion cannot be decided again. */
+/**
+ * Points the customer earned by tapping quick-reply buttons on this lead: the sum of the deltas of the taps that
+ * changed the score (each button counts once). Read from the activity history, NOT from leads.score, so accepting a
+ * suggestion again can never count a boost twice.
+ */
+export async function quickReplyBoostTotal(tx: Pick<Db, "select">, leadId: string): Promise<number> {
+  const rows = await tx
+    .select({ payload: activities.payload })
+    .from(activities)
+    .where(and(eq(activities.leadId, leadId), eq(activities.type, "quick_reply"), sql`${activities.payload}->>'scoreChanged' = 'true'`));
+  const seen = new Set<string>();
+  let total = 0;
+  for (const { payload } of rows) {
+    const action = (payload as { action?: unknown }).action;
+    if (typeof action !== "string" || !(action in QUICK_REPLIES) || seen.has(action)) continue;
+    seen.add(action);
+    total += QUICK_REPLIES[action as QuickReplyAction].delta;
+  }
+  return total;
+}
+
+/**
+ * Accept / edit / dismiss a pending suggestion. Accept keeps the customer's quick-reply points on top of the AI
+ * score (AI score + boosts, clamped to 0-100). An edit that changes the score saves it as typed (no boost added); an edit that leaves the score alone counts as accept. One transaction; a decided suggestion cannot be decided again. */
 export async function decideSuggestion(db: Db, actor: Actor, suggestionId: string, input: AiDecisionInput): Promise<SuggestionRow> {
   return db.transaction(async (tx) => {
     const [current] = await tx.select().from(aiSuggestions).where(eq(aiSuggestions.id, suggestionId)).for("update").limit(1);
@@ -163,17 +187,25 @@ export async function decideSuggestion(db: Db, actor: Actor, suggestionId: strin
     const original = suggestionOutputSchema.parse(current.originalOutput);
     let status: "accepted" | "edited" | "dismissed";
     let final: SuggestionOutput | null = null;
+    let boostTotal = 0;
     if (input.action === "dismiss") {
       status = "dismissed";
     } else if (input.action === "accept") {
       status = "accepted";
-      final = original;
+      boostTotal = await quickReplyBoostTotal(tx, current.leadId);
+      final = { ...original, score: Math.max(0, Math.min(100, original.score + boostTotal)) };
     } else {
       if (JSON.stringify(input.finalOutput) === JSON.stringify(original)) {
         throw new AppError("VALIDATION_ERROR", "No changes were made; use accept instead");
       }
       status = "edited";
       final = input.finalOutput;
+      // The panel has no score field, so an edit that leaves the score equal to the AI's is a draft-only edit:
+      // it still gets the boosts. A score the human changed is saved exactly as typed.
+      if (final.score === original.score) {
+        boostTotal = await quickReplyBoostTotal(tx, current.leadId);
+        final = { ...final, score: Math.max(0, Math.min(100, original.score + boostTotal)) };
+      }
     }
 
     // `status = 'pending'` in the WHERE makes "decide once" a database guarantee, not just the check above.
@@ -197,7 +229,7 @@ export async function decideSuggestion(db: Db, actor: Actor, suggestionId: strin
         leadId: current.leadId,
         actorId: actor.id,
         type: "ai_accepted",
-        payload: { suggestionId, status, source: current.source, score: final.score, nextAction: final.nextBestAction.type },
+        payload: { suggestionId, status, source: current.source, score: final.score, aiScore: original.score, boostTotal, nextAction: final.nextBestAction.type },
       });
     }
     return updated;

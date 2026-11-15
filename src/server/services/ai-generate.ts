@@ -1,7 +1,7 @@
 // Orchestrates one suggestion: prompt → adapter (15 s timeout, 1 retry) → JSON → Zod → guardrails.
 // Any failure ends in the rule-based fallback, so the caller always gets a schema-valid result.
 import { neutralReply, ruleBasedSuggestion } from "../../../skills/crm-copilot/fallback";
-import { unsupportedOffer } from "../../../skills/crm-copilot/guardrails";
+import { genderedWording, nonThaiField, unsupportedOffer } from "../../../skills/crm-copilot/guardrails";
 import { normalizeParticles } from "../../../skills/crm-copilot/particles";
 import { buildUserPrompt, PROMPT_VERSION, SYSTEM_PROMPT } from "../../../skills/crm-copilot/prompt";
 import { suggestionOutputSchema, type AiContext, type SuggestionOutput } from "../../../skills/crm-copilot/schema";
@@ -11,7 +11,7 @@ export const TIMEOUT_MS = 15_000;
 export const MAX_TOKENS = 800;
 const MAX_ATTEMPTS = 2; // first try + 1 retry
 
-export type FailureReason = "timeout" | "http_429" | "http_5xx" | "http_4xx" | "network" | "refusal" | "truncated" | "invalid_json" | "schema" | "not_configured" | "simulated";
+export type FailureReason = "timeout" | "http_429" | "http_5xx" | "http_4xx" | "network" | "refusal" | "truncated" | "invalid_json" | "schema" | "language" | "gendered" | "not_configured" | "simulated";
 
 export type GenerateResult = {
   output: SuggestionOutput;
@@ -40,7 +40,9 @@ const withReason = (reasons: string[], reason: string) => (reasons.length >= 5 ?
  * 2. a draft that mentions a discount, promotion or percentage, or states a price that is not the lead
  *    value or a figure in our outbound messages, is replaced by a neutral reply and a reason is added
  *    (see skills/crm-copilot/guardrails.ts);
- * 3. the draft speaks with the lead owner's polite particle only: the other one is rewritten
+ * 3. (in generateSuggestion, not here) summary/reasons/next action/missing info must be Thai and no gendered wording
+ *    is allowed: a violation is retried once, then replaced by the Thai rule-based fallback;
+ * 4. the draft speaks with the lead owner's polite particle only: the other one is rewritten
  *    (see skills/crm-copilot/particles.ts).
  */
 export function applyGuardrails(out: SuggestionOutput, ctx: AiContext): { output: SuggestionOutput; draftReplaced: boolean; particleNormalised: boolean } {
@@ -60,8 +62,8 @@ export function applyGuardrails(out: SuggestionOutput, ctx: AiContext): { output
         scoreReasons: withReason(
           result.scoreReasons,
           found === "a price"
-            ? "Draft replaced: it stated a price that does not match the lead value or our sent messages"
-            : "Draft replaced: a draft may not mention a discount, promotion or percentage",
+            ? "แทนที่ร่างข้อความ: ระบุราคาที่ไม่ตรงกับมูลค่าลีดหรือข้อความที่เราส่งไป"
+            : "แทนที่ร่างข้อความ: ห้ามกล่าวถึงส่วนลด โปรโมชัน หรือเปอร์เซ็นต์",
         ),
       };
     }
@@ -140,6 +142,15 @@ export async function generateSuggestion(
       const parsed = suggestionOutputSchema.safeParse(json);
       if (!parsed.success) {
         failure = "schema";
+        continue;
+      }
+      // Language and gender are code-enforced: a bad answer is retried once, then the Thai rule-based fallback is used.
+      if (nonThaiField(parsed.data) !== null) {
+        failure = "language";
+        continue;
+      }
+      if (genderedWording(parsed.data, [ctx.contact.fullName, ctx.company?.name]) !== null) {
+        failure = "gendered";
         continue;
       }
       return {

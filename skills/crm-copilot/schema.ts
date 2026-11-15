@@ -20,7 +20,7 @@ export const suggestionOutputSchema = z.strictObject({
 
 export type SuggestionOutput = z.infer<typeof suggestionOutputSchema>;
 
-export type AiEventKind = "customer_message" | "customer_enquiry" | "outbound_message" | "note" | "call" | "stage_change";
+export type AiEventKind = "customer_message" | "customer_enquiry" | "outbound_message" | "note" | "call" | "stage_change" | "customer_action";
 
 /** One timeline entry. `text` is already redacted (no phone/email) and trimmed. */
 export type AiEvent = { kind: AiEventKind; daysAgo: number; text: string };

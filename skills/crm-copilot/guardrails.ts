@@ -8,7 +8,7 @@
 //
 // Anything flagged is replaced by a neutral reply, so a false positive costs a generic draft,
 // never a wrong promise. Known gaps are listed in SKILL.md.
-import type { AiContext } from "./schema";
+import type { AiContext, SuggestionOutput } from "./schema";
 
 const DISCOUNT = /discount|rebate|promotion|promo(?![a-z])|half price|special price|special offer|ส่วนลด|ลดราคา|ลดให้|ราคาพิเศษ|โปรโมชั่น|โปรโมชัน|ลด\s*\d/i;
 const PERCENT = /\d+(?:\.\d+)?\s*(?:%|％|percent|per\s*cent|pct|เปอร์เซ็นต์|เปอร์เซนต์|เปอร์เซ็น)|ร้อยละ\s*\d/i;
@@ -63,4 +63,58 @@ export function unsupportedOffer(rawDraft: string, ctx: AiContext): "a percentag
     if (v >= 100 && !(looksLikeYear(v) && !m[2])) amounts.push(v); // "price ... in 2 days" and "price for 2026" are not prices
   }
   return amounts.some((a) => !allowed.has(a)) ? "a price" : null;
+}
+
+// ---- Language and gender (checked on the model's answer; a violation means retry, then the Thai rule-based fallback) ----
+
+// Thai letters, vowels and tone marks only (not the baht sign or Thai digits).
+const THAI_LETTER = /[ก-ฺเ-๎]/g;
+const LATIN_LETTER = /[A-Za-z]/g;
+
+/** True when most letters are Thai. A Thai text with a few English names (LINE OA, SSPY) passes; an English text does not. */
+export const isMostlyThai = (text: string) => {
+  const thai = text.match(THAI_LETTER)?.length ?? 0;
+  const latin = text.match(LATIN_LETTER)?.length ?? 0;
+  return thai > 0 && thai >= latin * 0.5;
+};
+
+/** The fields that must always be Thai. draftReply is not here: it follows the lead's locale. */
+export const thaiFields = (o: SuggestionOutput): string[] => [o.summary, ...o.scoreReasons, o.nextBestAction.detail, ...o.missingInfo];
+
+/** First of summary / scoreReasons / next action / missingInfo that is not Thai, or null. */
+export function nonThaiField(o: SuggestionOutput): string | null {
+  return thaiFields(o).find((t) => !isMostlyThai(t)) ?? null;
+}
+
+// Gendered pronouns, titles and words. The customer's gender is never known: a polite particle (ค่ะ/ครับ) says nothing about it.
+// "เขา" also means "mountain", so it only counts before a common verb ("เขาต้องการ"). Known gap: other uses of เขา slip through.
+const GENDERED = new RegExp(
+  [
+    String.raw`\b(?:she|her|hers|herself|he|him|his|himself|mr|mrs|ms|miss|madam|sir|female|male|woman|women|lady|gentleman)\b`,
+    "เธอ",
+    "ผู้หญิง",
+    "ผู้ชาย",
+    "สุภาพสตรี",
+    "สุภาพบุรุษ",
+    "นางสาว",
+    "(?<![ก-๙])นาง(?![ก-๙])",
+    "(?<![ก-๙])นาย(?![ก-๙])",
+    "เขา(?=ต้องการ|สนใจ|ถาม|บอก|ขอ|อยาก|ไม่|จะ|มี|ได้|พูด|ส่ง|ตอบ|โทร|กำลัง|เคย|ชอบ)",
+  ].join("|"),
+  "i",
+);
+
+/**
+ * The gendered word found anywhere in the output (draft included), or null. `names` (contact and company) are
+ * removed first: a customer called "Miss Ploy" or "นาย สมชาย" must not push every answer to the fallback.
+ */
+export function genderedWording(o: SuggestionOutput, names: (string | null | undefined)[] = []): string | null {
+  const all = [...thaiFields(o), ...(o.draftReply ? [o.draftReply] : [])];
+  const known = names.filter((n): n is string => !!n && n.trim().length > 0);
+  for (const raw of all) {
+    const t = known.reduce((acc, n) => acc.split(n).join(" "), raw);
+    const m = t.match(GENDERED);
+    if (m) return m[0];
+  }
+  return null;
 }

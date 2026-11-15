@@ -4,6 +4,7 @@ import { createMockAdapter, type LlmAdapter, type MockMode, type Usage, ZERO_USA
 import { buildContext } from "../../../src/server/services/ai-context";
 import { generateSuggestion } from "../../../src/server/services/ai-generate";
 import type { TimelineItem } from "../../../src/server/services/leads";
+import { genderedWording, nonThaiField } from "../guardrails";
 import { buildUserPrompt } from "../prompt";
 import { suggestionOutputSchema, type SuggestionOutput } from "../schema";
 import cases from "./cases.json";
@@ -20,7 +21,7 @@ type Check =
   | { type: "source"; value: "llm" | "fallback" }
   | { type: "missingInfoNonEmpty" };
 
-type EvalEvent = { daysAgo: number; kind: "in" | "out" | "note" | "call" | "website" | "stage"; text: string };
+type EvalEvent = { daysAgo: number; kind: "in" | "out" | "note" | "call" | "website" | "stage" | "quick"; text: string };
 export type EvalCase = {
   id: number;
   title: string;
@@ -72,6 +73,8 @@ function toTimeline(events: EvalEvent[]): TimelineItem[] {
         return { kind: "message", id, at, direction: "out", status: "sent", body: e.text };
       case "website":
         return { kind: "activity", id, at, type: "note", actorName: null, payload: { text: e.text, source: "website", system: true } };
+      case "quick":
+        return { kind: "activity", id, at, type: "quick_reply", actorName: null, payload: { text: `Customer tapped "${e.text}"`, action: e.text, scoreChanged: true } };
       case "stage": {
         const [from, rest] = e.text.split(" → ");
         const [to, reason] = (rest ?? "").split(" (reason: ");
@@ -147,6 +150,11 @@ export async function runEvalCases(adapter: LlmAdapter | null, opts: { timeoutMs
     const schema = suggestionOutputSchema.safeParse(res.output);
     if (!schema.success) failures.push("output does not match the Zod schema");
     if (!c.forceMode && res.source === "fallback") failures.push(`fell back unexpectedly (${res.failure})`);
+    // Always checked, in every case: Thai-only summary/reasons/next action/missing info, and no gendered wording.
+    const notThai = nonThaiField(res.output);
+    if (notThai) failures.push(`not Thai: "${notThai}"`);
+    const gendered = genderedWording(res.output, [ctx.contact.fullName, ctx.company?.name]);
+    if (gendered) failures.push(`gendered wording: "${gendered}"`);
     for (const check of c.checks) {
       const f = evaluate(check, res.output, res.source, prompt);
       if (f) failures.push(f);

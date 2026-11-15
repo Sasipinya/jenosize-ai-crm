@@ -164,3 +164,22 @@ Human review: พบ bug ส่งข้อความซ้ำตอนทด�
 สั่งแก้ทั้งฝั่งหน้าจอ (ไม่เติม draft หลังส่งแล้ว) และฝั่ง server (409 ถ้าข้อความเดิมภายใน 60 วินาที รวม Retry)
 ตัดสินใจไม่แก้กรณี failed → ส่งเองซ้ำ → Retry เพราะเกิดยาก บันทึกเป็น known limitation
 ทดสอบในเบราว์เซอร์และ LINE จริงเอง
+Hours: 1.3h (14 Nov 20:30–21:45) รวมทดสอบ LINE จริงและแก้บั๊กส่งซ้ำ
+
+## 2026-11-15 — Prod LINE test fixes: Thai-only output, score kept on accept, no gendered wording
+
+**Prompt summary:** Three issues from the prod LINE test (lead "LINE chat: SSPY"): (1) summary/reasons/next action came back in English on one refresh and Thai on another; (2) accepting a new suggestion (35) overwrote a score of 50 that included quick-reply boosts; (3) the summary called the customer "she", guessed from ค่ะ. Plan first, then code after approval; Edit saves a typed score as-is; due label keys on the draft only.
+
+**Produced:**
+- Prompt v4: rules 10 (Thai-only fields), 11 (no gender inference), 12 (quick-reply taps are context, no points added by the model). Code checks `nonThaiField` / `genderedWording`: retry once, then the rule-based fallback, which is now Thai.
+- Quick-reply taps enter the AI context as `customer_action` events. Accept saves `AI score + boosts` (clamped 0-100), boosts read from the activity history (each button once), so a second accept never double counts; the `ai_accepted` activity records `aiScore`, `boostTotal`, `score`. Draft-only edit behaves like accept; an edit that changes the score saves it as typed. Button shows "Accept: AI 35 + quick replies 15 = 50".
+- Eval cases 14-16, a universal Thai/gender check in the eval runner, unit and service tests. Guardrail reason strings are now Thai, so 4 test assertions and the v3 check were updated to match the new spec (no test weakened). Independent reviewer: PASS, minor findings fixed (dead `\b` in case 15, name/ทำนาย false positives).
+
+**Known, not fixed:**
+- A guardrail fallback still shows the badge "Rule-based fallback (AI unavailable)" although the AI was available.
+- Short Thai items that are mostly English names (for example "ชื่อ Facebook Page") can fail the Thai check and push a good answer to the fallback; the retry sends the same prompt.
+- Rule 12 (do not add points for taps) is only a prompt rule; code does not enforce it. Not testable with the mock.
+- A repeat tap still invalidates the cached suggestion. The due label is English when there is no draft.
+- Mock eval cannot show that the real model stops drifting; run `pnpm eval --adapter claude` yourself to check.
+
+**Human review:**

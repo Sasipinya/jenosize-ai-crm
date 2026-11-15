@@ -4,7 +4,7 @@
 // Anything else is replaced by a neutral reply plus a reason.
 import { describe, expect, it } from "vitest";
 import { neutralReply, ruleBasedSuggestion } from "../skills/crm-copilot/fallback";
-import { unsupportedOffer } from "../skills/crm-copilot/guardrails";
+import { genderedWording, isMostlyThai, nonThaiField, unsupportedOffer } from "../skills/crm-copilot/guardrails";
 import { suggestionOutputSchema, type AiContext, type AiEvent, type SuggestionOutput } from "../skills/crm-copilot/schema";
 import { createMockAdapter } from "@/server/services/ai-adapters";
 import { applyGuardrails, generateSuggestion } from "@/server/services/ai-generate";
@@ -161,7 +161,7 @@ describe("applyGuardrails", () => {
     const { output, draftReplaced } = applyGuardrails(base("We can give you 50% off, price 9,999 baht."), ctx());
     expect(draftReplaced).toBe(true);
     expect(output.draftReply).toBe(neutralReply(ctx()));
-    expect(output.scoreReasons.at(-1)).toBe("Draft replaced: a draft may not mention a discount, promotion or percentage");
+    expect(output.scoreReasons.at(-1)).toBe("แทนที่ร่างข้อความ: ห้ามกล่าวถึงส่วนลด โปรโมชัน หรือเปอร์เซ็นต์");
     expect(output.scoreReasons).toContain("Stage is qualified"); // existing reasons kept
     expect(suggestionOutputSchema.safeParse(output).success).toBe(true);
     // Nothing else is touched.
@@ -171,7 +171,7 @@ describe("applyGuardrails", () => {
 
   it("a price that does not match gets its own reason", () => {
     const { output } = applyGuardrails(base("The price is 9,999 baht."), ctx());
-    expect(output.scoreReasons.at(-1)).toBe("Draft replaced: it stated a price that does not match the lead value or our sent messages");
+    expect(output.scoreReasons.at(-1)).toBe("แทนที่ร่างข้อความ: ระบุราคาที่ไม่ตรงกับมูลค่าลีดหรือข้อความที่เราส่งไป");
     expect(suggestionOutputSchema.safeParse(output).success).toBe(true);
   });
 
@@ -180,7 +180,7 @@ describe("applyGuardrails", () => {
     const { output } = applyGuardrails(base("discount for you", five), ctx());
     expect(output.scoreReasons).toHaveLength(5);
     expect(output.scoreReasons.slice(0, 4)).toEqual(["r1", "r2", "r3", "r4"]);
-    expect(output.scoreReasons[4]).toMatch(/^Draft replaced/);
+    expect(output.scoreReasons[4]).toMatch(/^แทนที่ร่างข้อความ/);
     expect(suggestionOutputSchema.safeParse(output).success).toBe(true);
   });
 
@@ -220,7 +220,7 @@ describe("through generateSuggestion", () => {
     expect(r.draftReplaced).toBe(true);
     expect(r.output.draftReply).toBe(neutralReply(ctx()));
     expect(r.output.draftReply).not.toMatch(/50|discount|9,999|baht/i);
-    expect(r.output.scoreReasons.some((x) => x.startsWith("Draft replaced"))).toBe(true);
+    expect(r.output.scoreReasons.some((x) => x.startsWith("แทนที่ร่างข้อความ"))).toBe(true);
     // The model's own draft is kept for the eval report (never stored in the DB).
     expect(r.rawOutput?.draftReply).toMatch(/50% discount/);
     expect(r.rawOutput?.draftReply).not.toBe(r.output.draftReply);
@@ -239,6 +239,92 @@ describe("through generateSuggestion", () => {
         const c = ctx({ locale, valueThb });
         expect(applyGuardrails(ruleBasedSuggestion(c), c).draftReplaced).toBe(false);
       }
+    }
+  });
+});
+
+describe("Thai-only output and no gendered wording", () => {
+  const thai = (over: Partial<SuggestionOutput> = {}): SuggestionOutput => ({
+    summary: "ลูกค้าสนใจบริการและรอการตอบกลับ",
+    score: 50,
+    scoreReasons: ["ลูกค้ากำลังรอการตอบกลับ"],
+    nextBestAction: { type: "line_reply", detail: "ตอบกลับวันนี้", dueInDays: 0 },
+    draftReply: "สวัสดีค่ะ คุณสมชาย ขอบคุณที่ติดต่อมาค่ะ",
+    confidence: "low",
+    missingInfo: ["งบประมาณ"],
+    ...over,
+  });
+
+  it("isMostlyThai accepts Thai with a few English names and rejects English", () => {
+    expect(isMostlyThai("ลูกค้าถามเรื่อง LINE OA และราคา")).toBe(true);
+    expect(isMostlyThai("The customer is waiting for a reply")).toBe(false);
+    expect(isMostlyThai("฿50,000")).toBe(false); // no Thai letters at all
+  });
+
+  it("nonThaiField flags English in summary, reasons, next action or missing info; draftReply is not checked", () => {
+    expect(nonThaiField(thai())).toBeNull();
+    expect(nonThaiField(thai({ summary: "Customer wants a quote" }))).toBe("Customer wants a quote");
+    expect(nonThaiField(thai({ scoreReasons: ["ลูกค้าตอบเร็ว", "Fast reply"] }))).toBe("Fast reply");
+    expect(nonThaiField(thai({ nextBestAction: { type: "call", detail: "Call today", dueInDays: 0 } }))).toBe("Call today");
+    expect(nonThaiField(thai({ missingInfo: ["Budget"] }))).toBe("Budget");
+    expect(nonThaiField(thai({ draftReply: "Hi Somchai, thanks for reaching out." }))).toBeNull();
+  });
+
+  it("genderedWording catches pronouns, titles and gender words in Thai and English, in any field", () => {
+    expect(genderedWording(thai())).toBeNull();
+    expect(genderedWording(thai({ summary: "ลูกค้าบอกว่าเธอสนใจ" }))).toBe("เธอ");
+    expect(genderedWording(thai({ summary: "ลูกค้าผู้หญิงสนใจแพ็กเกจ" }))).toBe("ผู้หญิง");
+    expect(genderedWording(thai({ scoreReasons: ["ลูกค้าผู้ชายตอบเร็ว"] }))).toBe("ผู้ชาย");
+    expect(genderedWording(thai({ summary: "ลูกค้า She wrote ค่ะ" }))).toBe("She");
+    expect(genderedWording(thai({ draftReply: "เรียน Mr. Somchai ขอบคุณค่ะ" }))).toBe("Mr");
+    expect(genderedWording(thai({ summary: "เขาต้องการใบเสนอราคา" }))).toBe("เขา");
+  });
+
+  it("genderedWording does not flag neutral words that contain the same letters", () => {
+    expect(genderedWording(thai({ summary: "ลูกค้าติดต่อผ่านนายหน้า" }))).toBeNull(); // นายหน้า = broker
+    expect(genderedWording(thai({ summary: "ลูกค้าส่ง email และ shelf-ware มาให้" }))).toBeNull(); // male in email, he in shelf
+    expect(genderedWording(thai({ summary: "ลูกค้าเข้าเว็บไซต์ และถามเรื่องเขาใหญ่" }))).toBeNull();
+    expect(genderedWording(thai({ summary: "ลูกค้าและคุณสมชายสนใจ" }))).toBeNull();
+    expect(genderedWording(thai({ summary: "ลูกค้าทำนายยอดขายไว้สูง" }))).toBeNull(); // ทำนาย = predict
+    // A customer or company whose own name holds a title is not a guess about gender.
+    expect(genderedWording(thai({ draftReply: "สวัสดีค่ะ Miss Ploy ขอบคุณค่ะ" }), ["Miss Ploy"])).toBeNull();
+    expect(genderedWording(thai({ summary: "ลูกค้า Miss Ploy สนใจ" }))).toBe("Miss");
+  });
+
+  it("English drift: the model is retried once, then the Thai rule-based fallback is used", async () => {
+    const adapter = createMockAdapter({ mode: "english_drift" });
+    const r = await generateSuggestion(ctx({ locale: "th" }), { adapter });
+    expect(adapter.calls).toHaveLength(2);
+    expect(r.source).toBe("fallback");
+    expect(r.failure).toBe("language");
+    expect(nonThaiField(r.output)).toBeNull();
+    expect(suggestionOutputSchema.safeParse(r.output).success).toBe(true);
+  });
+
+  it("a gendered answer (guessed from ค่ะ) is retried once, then the neutral Thai fallback is used", async () => {
+    const adapter = createMockAdapter({ mode: "gendered" });
+    const r = await generateSuggestion(ctx({ locale: "th" }), { adapter });
+    expect(adapter.calls).toHaveLength(2);
+    expect(r.source).toBe("fallback");
+    expect(r.failure).toBe("gendered");
+    expect(genderedWording(r.output)).toBeNull();
+    expect(r.output.summary).toContain("ลูกค้า");
+  });
+
+  it("a clean Thai answer is accepted on the first try", async () => {
+    const adapter = createMockAdapter();
+    const r = await generateSuggestion(ctx({ locale: "th" }), { adapter });
+    expect(adapter.calls).toHaveLength(1);
+    expect(r.source).toBe("llm");
+    expect(nonThaiField(r.output)).toBeNull();
+    expect(genderedWording(r.output)).toBeNull();
+  });
+
+  it("the rule-based fallback is Thai and neutral for every stage", () => {
+    for (const stage of ["new", "qualified", "proposal", "won", "lost"] as const) {
+      const out = ruleBasedSuggestion(ctx({ stage, inbound: false }));
+      expect(nonThaiField(out)).toBeNull();
+      expect(genderedWording(out)).toBeNull();
     }
   });
 });
