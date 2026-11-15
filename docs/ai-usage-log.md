@@ -207,4 +207,6 @@ Hours: 1.3h (14 Nov 20:30–21:45) รวมทดสอบ LINE จริงแ
 
 **Known:** No further widening is planned; the next step is the `flags` field.
 
-**Human review:**
+**Human review:** รัน eval กับ Claude จริง 2 รอบ ได้ 15/16 ทั้งสองรอบ แต่ fail คนละ case (case 2 และ 3) ทั้งที่ output ความหมายถูก
+ขยาย regex ครั้งเดียวแล้วหยุด เพราะ model ตอบไม่เหมือนเดิมทุกรอบ จึงบันทึกเป็น known limitation
+agent ท้วงว่าคำว่า "คำสั่ง" ที่เราเสนอกว้างเกินไป เราเห็นด้วยและตัดออก
