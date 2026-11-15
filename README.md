@@ -5,7 +5,7 @@
 An internal CRM MVP for a 20-person commercial team. Leads arrive from the website form, manual entry and LINE Official Account chat; a salesperson moves them through New → Qualified → Proposal → Won/Lost, asks an AI copilot for a summary, a score with reasons, a next action and a draft Thai reply, and approves every outgoing LINE message. The AI only suggests: nothing it produces changes data or reaches a customer until a person accepts it, and every approval leaves an audit row. Synthetic data only.
 
 - **Deployed:** https://jenosize-ai-crm-mu.vercel.app
-- **Privacy notice (public):** `/privacy`
+- **Privacy notice (public):** https://jenosize-ai-crm-mu.vercel.app/privacy
 
 ## Demo credentials
 
@@ -25,7 +25,7 @@ The seed takes the password from `SEED_DEMO_PASSWORD`; `.env.example` and `docs/
 1. Scan the QR code and add the test Official Account, then send it any message.
 2. You get one automatic reply, the fixed privacy notice (the only automatic message the system sends; see [docs/pdpa-line-notice.md](docs/pdpa-line-notice.md)).
 3. In the CRM, a new lead (source LINE) appears with your message in its timeline.
-4. Open it, press **Refresh suggestion**, then Accept, Edit or Dismiss. Write or accept a reply and send it: it arrives in your LINE chat.
+4. Open it, press **Get AI suggestion** (or **Refresh suggestion** if one exists), then Accept, Edit or Dismiss. Write or accept a reply and send it: it arrives in your LINE chat.
 5. Tap the Quick Reply buttons (นัดคุย / ขอใบเสนอราคา / ไม่สนใจ) on that reply and watch the score and timeline change.
 
 Without a LINE account you can drive the webhook locally: `pnpm line:simulate` (signed payloads, localhost only).
@@ -55,7 +55,7 @@ Every requirement from the brief, with where to find it. "Not done" means it is 
 
 | Req | What | Status | Evidence |
 | --- | --- | --- | --- |
-| R1 | Responsive 375px / 1280px | Done, not systematically verified | Sidebar on desktop, top bar + bottom nav on mobile: `src/app/(crm)/layout.tsx`, `src/components/app-shell/`. Checked by hand by the owner; no automated test and no screenshots in this README |
+| R1 | Responsive 375px / 1280px | Done, not systematically verified | Sidebar on desktop, top bar + bottom nav on mobile: `src/app/(crm)/layout.tsx`, `src/components/app-shell/`. Checked by hand at 375 px and 1280 px; no automated test or screenshots. |
 | R2 | Login, admin + sales | Done | `src/server/auth.ts`, `src/app/(auth)/login/`, `tests/auth.test.ts` |
 | R3 | Lead list/create/edit/search/filter | Done | `src/app/(crm)/leads/`, `src/server/services/leads.ts`, `tests/crm-flow.test.ts` |
 | R4 | Companies | Done | `src/app/(crm)/companies/`, `src/server/services/companies.ts`. Create/edit has no dedicated test |
@@ -132,7 +132,7 @@ Caveats: the eval conversations are short, and real leads send up to 20 recent e
 
 ## Hours: plan vs actual
 
-The plan is 16 h ([docs/plan.md](docs/plan.md)). Actual hours are the owner's own figures (the plan's "actual" column, as corrected by the owner). The AI-usage log has an hours line for one task only (Phase 4 follow-up, 1.3 h); the rest are not logged there.
+Plan from [docs/plan.md](docs/plan.md); actual hours are my own tracked time per phase. Planning and research are not counted.
 
 | Phase | Plan | Actual | Note |
 | --- | --- | --- | --- |
@@ -144,8 +144,6 @@ The plan is 16 h ([docs/plan.md](docs/plan.md)). Actual hours are the owner's ow
 | 5 Handover | 2.5 h | 0.8 h | 15 Nov, 21:33–22:20 |
 | **Total (phases 1–5 + prod-test fixes)** | 16 h | **8.3 h** | 7.5 h before Phase 5 + 0.8 h |
 
-Planning and research time (reading docs, account setup, designing the plan) is not counted.
-
 ### What was cut, and why
 
 | Cut | Reason |
@@ -155,7 +153,7 @@ Planning and research time (reading docs, account setup, designing the plan) is 
 | AI quality metrics page, few-shot admin UI, devcontainer | Listed in the plan as "if time allows"; not built |
 | Screenshots in README | Not done in this phase |
 
-These reasons come from the plan's pre-agreed cut order and the Phase 5 timebox; the owner should confirm or correct them.
+These reasons come from the plan's pre-agreed cut order and the Phase 5 timebox.
 
 ## Production next steps
 
@@ -169,7 +167,7 @@ These reasons come from the plan's pre-agreed cut order and the Phase 5 timebox;
 
 ## How AI was used
 
-Claude Code did the implementation in small, reviewed steps under the rules in `CLAUDE.md`: plan first, human approval, tests, an independent reviewer pass on non-trivial diffs, and a commit only after the owner's approval; nothing was pushed by the agent. [docs/ai-usage-log.md](docs/ai-usage-log.md) records each task, what the agent produced, its self-corrections, what the owner rejected or changed, and one meaningful change after human inspection (the Vercel `PUBLIC_` env-var rename, and real-LINE test bugs found by the owner). The product's own AI feature is described in [AI design](#ai-design).
+Claude Code did the implementation in small, reviewed steps under the rules in `CLAUDE.md`: plan first, human approval, tests, an independent reviewer pass on non-trivial diffs, and a commit only after my approval; nothing was pushed by the agent. [docs/ai-usage-log.md](docs/ai-usage-log.md) records each task, what the agent produced, its self-corrections, what I rejected or changed, and one meaningful change after human inspection (the Vercel `PUBLIC_` env-var rename, and bugs I found in the real LINE test). The product's own AI feature is described in [AI design](#ai-design).
 
 ## Docs
 
