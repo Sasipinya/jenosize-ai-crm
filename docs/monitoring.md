@@ -24,6 +24,7 @@ Status: **logging is in place; alerting is not.** Nothing here pages anyone. The
 | `line_postback_ignored` | inbound | postback ignored (reason) |
 | `line_default_owner_not_found` | inbound | `LINE_DEFAULT_OWNER_EMAIL` does not match a user |
 | `public_lead`, `contact_us_failed` | website intake | lead created / form error |
+| `health_db_error` | `/api/health` | the database check failed |
 
 ## What to alert on
 
@@ -40,9 +41,9 @@ Thresholds are starting points for a 20-user team, not measured values.
 | Messages stuck in `approved` | `messages.status = 'approved'` older than a minute | A send was interrupted | any |
 | Privacy notice failures | `line_notice_failed` | A new user was not told how their data is used (`consent_at` stays empty) | any |
 | API errors | `api_request` with `status >= 500`, `unhandled_error` | Bugs or DB trouble | > 1% of requests |
-| DB connectivity | Neon dashboard, 5xx spike | Everything depends on it | provider alerts |
+| DB connectivity | `/api/health` returns 503, `health_db_error` log, Neon dashboard | Everything depends on it | any 503 for more than a minute |
 
-Not available yet: there is no `/api/health` endpoint for an uptime check (the route guard already lists it as public, but no route exists), and no dashboard.
+Uptime check: point a monitor at `GET /api/health` (public; 503 when the database is unreachable, `status: "degraded"` when a real AI/LINE adapter is selected but not configured; see [docs/api.md](api.md)). There is still no dashboard.
 
 ## Operating notes
 

@@ -269,3 +269,21 @@ AI ขึ้น score เองเพราะเห็นการกดปุ�
 **Known, not fixed:** `src/server/logger.ts` still has a stale comment ("request logging is wired in Phase 5") although `http.ts` already logs requests. The `/api/health` route is listed as public in the guard but does not exist.
 
 **Human review:**
+
+
+## 2026-11-15 — Phase 5 nice-to-have: CI workflow and GET /api/health
+
+**Prompt summary:** Timebox 40 min, plan in 5 lines then "go". GitHub Actions CI (frozen install, lint, typecheck, test, mock eval, no secrets) with a README badge; `GET /api/health` (status, db, ai adapter/model/simulatedDown, line adapter, version), public, no secrets/PII, 503 when the DB is down, with a test; README evidence table updated (D5 "partly done").
+
+**Produced:**
+- `.github/workflows/ci.yml` (Node 22, pnpm pinned to the local 12.18.0, `permissions: contents: read`).
+- `src/server/services/health.ts`, `src/app/api/health/route.ts`, `tests/health.test.ts` (shape, simulated AI down, degraded without keys and no key echoed, 503 on DB failure and when `DATABASE_URL` is unset with no error text in the body, public through the guard).
+- README (badge, D5, CI, limitations, next steps), `docs/api.md`, `docs/monitoring.md`.
+
+**Agent decisions worth reviewing:**
+- Added `configured` booleans to `ai` and `line` and a `degraded` status (a real adapter selected without its key) beyond the requested shape. `simulatedDown` is reported but does not change `status`.
+- Health is a flat JSON probe, not the `{ data, requestId }` envelope.
+- The badge uses `Sasipinya/jenosize-ai-crm` (GitHub username given by the owner). The pg pool now has `connectionTimeoutMillis: 10_000` so a hanging DB host cannot hold probe connections forever.
+- The workflow was not run on GitHub: only the same commands were run locally (Node 26, not 22).
+
+**Human review:**

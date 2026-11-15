@@ -13,7 +13,7 @@ const globalForDb = globalThis as unknown as { __crmPool?: Pool; __crmDb?: Db };
 
 export function createPool(connectionString: string): Pool {
   // Small pool: on Vercel each function instance holds its own; Neon's -pooler endpoint multiplexes.
-  return new Pool({ connectionString, max: 5, idleTimeoutMillis: 10_000 });
+  return new Pool({ connectionString, max: 5, idleTimeoutMillis: 10_000, connectionTimeoutMillis: 10_000 });
 }
 
 export function getDb(): Db {

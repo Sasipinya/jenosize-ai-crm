@@ -1,5 +1,7 @@
 # AI CRM (Jenosize take-home)
 
+[![CI](https://github.com/Sasipinya/jenosize-ai-crm/actions/workflows/ci.yml/badge.svg)](https://github.com/Sasipinya/jenosize-ai-crm/actions/workflows/ci.yml)
+
 An internal CRM MVP for a 20-person commercial team. Leads arrive from the website form, manual entry and LINE Official Account chat; a salesperson moves them through New → Qualified → Proposal → Won/Lost, asks an AI copilot for a summary, a score with reasons, a next action and a draft Thai reply, and approves every outgoing LINE message. The AI only suggests: nothing it produces changes data or reaches a customer until a person accepts it, and every approval leaves an audit row. Synthetic data only.
 
 - **Deployed:** https://jenosize-ai-crm-mu.vercel.app
@@ -83,10 +85,10 @@ Every requirement from the brief, with where to find it. "Not done" means it is 
 | D2 | PDPA | Partly | Notice on first LINE contact + `consent_at`: done (`line/notice.ts`, `/privacy`). **Admin "erase customer data": not done** (the `erased_at` column and the guards that block editing/sending to an erased contact exist; nothing sets it). **Automatic deletion: not implemented** (the policy below is decided, enforcement is manual; see [Production next steps](#production-next-steps)) |
 | D3 | Thai-first | Done | `pg_trgm` indexes + Thai search tests; owner's ครับ/ค่ะ enforced in code: `skills/crm-copilot/particles.ts` |
 | D4 | One-command setup | Done, with a different name | `pnpm install && pnpm db:setup` (not `pnpm setup`, [ADR 005](docs/adr/005-setup-command-name.md)) |
-| D5 | Demo control panel + `/api/health` | **Not done** | The switches `simulate_ai_down` and `simulate_line_down` (in `app_settings`) are read by the code and tested, but only the seed or a SQL update can change them: no admin page, no API. No `/api/health` route |
+| D5 | Demo control panel + `/api/health` | **Partly done: `/api/health` done, admin panel not done** | `GET /api/health` (`src/app/api/health/route.ts`, `src/server/services/health.ts`, `tests/health.test.ts`) reports DB, AI adapter/model/`simulatedDown`, LINE adapter and git version. The switches `simulate_ai_down` and `simulate_line_down` (in `app_settings`) are read by the code and tested, but only the seed or a SQL update can change them: no admin page, no API to flip them |
 | D6 | LINE Quick Reply | Done | `line/notice.ts`, `line/inbound.ts` (`applyPostback`), `tests/line-webhook.test.ts`, `tests/quick-reply-score.test.ts` |
 
-Also not done: CI (there is no `.github/` workflow), so lint/typecheck/test/eval run locally only.
+CI: `.github/workflows/ci.yml` runs install (frozen lockfile), lint, typecheck, test and the mock eval on every push and pull request, with no secrets. It has not been run on GitHub yet: check the first run (the badge above shows the status once the repo is on GitHub).
 
 ## AI design
 
@@ -114,7 +116,7 @@ The AI-specific ones are kept in one place, [skills/crm-copilot/SKILL.md](skills
 
 - Erasing a customer is manual (no admin button) and there is no automatic deletion; the retention policy below is not enforced by code.
 - Any logged-in user can retry any message or edit any record; only reopening a closed lead needs admin.
-- No admin page for the demo switches, no `/api/health`, no CI, no alerting.
+- No admin page for the demo switches and no alerting (only logs and the `/api/health` probe).
 - Two simultaneous first messages from a contact whose leads are all closed can create two leads; an event whose processing is killed midway keeps `processed_at` and `error` both empty ([usage log](docs/ai-usage-log.md), Phase 4).
 - Messages from an erased contact are still stored.
 - Responsive layout was checked by hand, not by tests.
@@ -148,8 +150,7 @@ Planning and research time (reading docs, account setup, designing the plan) is 
 | Cut | Reason |
 | --- | --- |
 | Admin "erase customer data" button (D2) | In the plan's own cut order ([docs/plan.md](docs/plan.md), "ความเสี่ยงและสิ่งที่ตัดได้"): "write it as a next step instead". Deletion is manual for now |
-| Demo control panel + `/api/health` (D5) | Also in the plan's cut order ("use env toggles instead"); the switches work at the database level |
-| CI workflow | Not built in Phase 5 within its timebox |
+| Demo control panel (D5; `/api/health` was built) | Also in the plan's cut order ("use env toggles instead"); the switches work at the database level |
 | AI quality metrics page, few-shot admin UI, devcontainer | Listed in the plan as "if time allows"; not built |
 | Screenshots in README, gitleaks run | Not done in this phase |
 
@@ -159,8 +160,8 @@ These reasons come from the plan's pre-agreed cut order and the Phase 5 timebox;
 
 1. **PDPA (not implemented: the erase action and automatic deletion):** build the erase action (anonymise the contact, keep the audit trail, write `data_erased`); implement automatic deletion for the retention policy (LINE data kept while the lead is active, deleted within 30 days of a request) and reset the demo data after the review period; stop storing messages from erased contacts; add an explicit opt-in step if marketing messages are planned; have counsel review the notice and `/privacy`.
 2. **Access control:** per-record ownership and role checks beyond "admin reopens closed leads"; a real identity provider (SSO) instead of the shared demo password; rate limit sign-in.
-3. **Reliability:** `/api/health` and an uptime check; ship logs to a log drain and wire the alerts in [docs/monitoring.md](docs/monitoring.md); a shared rate limiter (the in-memory one is per instance); a recovery job for LINE events whose processing was killed midway.
-4. **CI and security:** GitHub Actions for lint, typecheck, test and mock eval; `gitleaks` on the history; dependency audit; rotate the LINE and Anthropic keys on a schedule.
+3. **Reliability:** an uptime check on `/api/health`; ship logs to a log drain and wire the alerts in [docs/monitoring.md](docs/monitoring.md); a shared rate limiter (the in-memory one is per instance); a recovery job for LINE events whose processing was killed midway.
+4. **CI and security:** add the real-model eval as a manual or nightly job; `gitleaks` on the history; dependency audit; rotate the LINE and Anthropic keys on a schedule.
 5. **AI quality:** run the real-model eval before each prompt change and keep the report; replace regex checks on free text with a structured `flags` field in the output (for example a prompt-injection flag); give the model a code-computed "customer declined" signal so it does not propose a follow-up after ไม่สนใจ; measure real cost per suggestion with production-size context.
 6. **LINE:** re-verify payload shapes and Retry-Key behaviour against the Messaging API reference; handle multi-instance webhook races on real Postgres and load-test concurrency (pglite cannot).
 7. **Product:** admin page for the demo switches and few-shot switch, AI-quality metrics (acceptance/edit rate per prompt version), automated responsive checks at 375 px.
