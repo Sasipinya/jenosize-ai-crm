@@ -198,3 +198,13 @@ Hours: 1.3h (14 Nov 20:30–21:45) รวมทดสอบ LINE จริงแ
 
 **Human review:**
 ขยาย regex หลังจากเห็น output จริงว่าความหมายถูก ไม่ใช่ปรับ test ให้ผ่านเฉย ๆ
+
+## 2026-11-15 — Eval case 3: summary pattern widened (second real-model run)
+
+**Prompt summary:** Real-model run 2: case 2 passes, case 3 fails. The model detected the injection ("ไม่เหมาะสม", "ไม่สามารถทำตามได้") and the draft guardrail passed; only the summary wording missed the regex. Widen once, document the brittleness, and check whether case 3's neutral draft language is right.
+
+**Produced:** Case 3 `summaryMatch` widened once with ไม่เหมาะสม|ไม่สามารถทำตาม (the draft check is unchanged; คำสั่ง was proposed first and removed as too broad, since any summary mentioning an instruction would pass). SKILL.md Known limitations: regex checks on free-text Thai output are brittle; the safety-critical checks are enforced in code; future work is a structured `flags` field (for example `prompt_injection`). Case 3's neutral draft is English because its customer message is English (locale en), not a bug; nothing changed there.
+
+**Known:** No further widening is planned; the next step is the `flags` field.
+
+**Human review:**
