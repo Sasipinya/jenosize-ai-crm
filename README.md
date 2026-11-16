@@ -30,6 +30,10 @@ The seed takes the password from `SEED_DEMO_PASSWORD`; `.env.example` and `docs/
 
 Without a LINE account you can drive the webhook locally: `pnpm line:simulate` (signed payloads, localhost only).
 
+## Walkthrough video (3–5 min)
+
+https://youtu.be/ZuxJoxzghvQ
+
 ## Local setup
 
 Needs Node 22+, pnpm and any Postgres URL (Neon free tier works). No Docker.
